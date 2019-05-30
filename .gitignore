@@ -36,3 +36,5 @@ vignettes/*.pdf
 rsconnect/
 
 data/
+
+data-split/
