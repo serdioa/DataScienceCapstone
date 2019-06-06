@@ -211,9 +211,7 @@ $(document).ready(function () {
 <p>We define a function which splits the specified file on parts described above:</p>
 <pre class="r"><code>splitFile &lt;- function(name, out.dir) {
     # Reading dataset from the input file.
-    inCon &lt;- file(name, open = &quot;r&quot;)
-    data &lt;- readLines(con = inCon)
-    close(inCon)
+    data &lt;- readr::read_lines(name)
 
     # Prepare list with indexes of all data items.
     data.index &lt;- 1:length(data)
@@ -245,20 +243,10 @@ $(document).ready(function () {
     outTesting &lt;- file.path(out.dir, sub(&quot;(.)\\.[^.]+$&quot;, &quot;\\1.testing.txt&quot;, base))
     outValidation &lt;- file.path(out.dir, sub(&quot;(.)\\.[^.]+$&quot;, &quot;\\1.validation.txt&quot;, base))
 
-    # Writing training dataset to the output file.
-    outCon &lt;- file(outTraining, open = &quot;w&quot;)
-    writeLines(data.training, outCon)
-    close(outCon)
-
-    # Writing testing dataset to the output file.
-    outCon &lt;- file(outTesting, open = &quot;w&quot;)
-    writeLines(data.testing, outCon)
-    close(outCon)
-
-    # Writing validation dataset to the output file.
-    outCon &lt;- file(outValidation, open = &quot;w&quot;)
-    writeLines(data.validation, outCon)
-    close(outCon)
+    # Writing datasets to output files.
+    readr::write_lines(data.training, outTraining)
+    readr::write_lines(data.testing, outTesting)
+    readr::write_lines(data.validation, outValidation)
 }</code></pre>
 <p>To make results reproduceable, we set the seed of the random number generator.</p>
 <pre class="r"><code>set.seed(20190530)</code></pre>
@@ -266,14 +254,6 @@ $(document).ready(function () {
 <pre class="r"><code>splitFile(&quot;data/en_US.blogs.txt&quot;, &quot;data-split&quot;)
 splitFile(&quot;data/en_US.news.txt&quot;, &quot;data-split&quot;)
 splitFile(&quot;data/en_US.twitter.txt&quot;, &quot;data-split&quot;)</code></pre>
-<pre><code>## Warning in readLines(con = inCon): line 167155 appears to contain an
-## embedded nul</code></pre>
-<pre><code>## Warning in readLines(con = inCon): line 268547 appears to contain an
-## embedded nul</code></pre>
-<pre><code>## Warning in readLines(con = inCon): line 1274086 appears to contain an
-## embedded nul</code></pre>
-<pre><code>## Warning in readLines(con = inCon): line 1759032 appears to contain an
-## embedded nul</code></pre>
 <p>As a sanity check, we count a number of lines in each source file, as well in the partial files produced by the split.</p>
 <pre class="r"><code>library(R.utils)
 

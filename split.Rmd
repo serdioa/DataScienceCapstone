@@ -36,9 +36,7 @@ We define a function which splits the specified file on parts described above:
 ```{r}
 splitFile <- function(name, out.dir) {
     # Reading dataset from the input file.
-    inCon <- file(name, open = "r")
-    data <- readLines(con = inCon)
-    close(inCon)
+    data <- readr::read_lines(name)
 
     # Prepare list with indexes of all data items.
     data.index <- 1:length(data)
@@ -70,20 +68,10 @@ splitFile <- function(name, out.dir) {
     outTesting <- file.path(out.dir, sub("(.)\\.[^.]+$", "\\1.testing.txt", base))
     outValidation <- file.path(out.dir, sub("(.)\\.[^.]+$", "\\1.validation.txt", base))
 
-    # Writing training dataset to the output file.
-    outCon <- file(outTraining, open = "w")
-    writeLines(data.training, outCon)
-    close(outCon)
-
-    # Writing testing dataset to the output file.
-    outCon <- file(outTesting, open = "w")
-    writeLines(data.testing, outCon)
-    close(outCon)
-
-    # Writing validation dataset to the output file.
-    outCon <- file(outValidation, open = "w")
-    writeLines(data.validation, outCon)
-    close(outCon)
+    # Writing datasets to output files.
+    readr::write_lines(data.training, outTraining)
+    readr::write_lines(data.testing, outTesting)
+    readr::write_lines(data.validation, outValidation)
 }
 ```
 
