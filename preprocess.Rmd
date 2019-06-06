@@ -1,0 +1,145 @@
+---
+title: "Preprocessing the Corpora"
+author: "Alexey Serdyuk"
+date: "6 June 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a part of the capstone project for the cycle of courses
+[Data Science Specialization](https://www.coursera.org/specializations/jhu-data-science)
+offered on [Coursera](https://www.coursera.org) by
+[Johns Hopkins University](https://www.jhu.edu).
+
+We assume that the corpora was already downloaded from a location provided in
+the course and extracted from the zip file into a local directory. Now we are
+going to clean up the corpora for initial analysis.
+
+We start by loading required libraries.
+
+```{r message=FALSE}
+library(tm) # For handling the corpora.
+library(readr) # For fast reading/writing.
+```
+
+The function `tm::DirSource` is able to read text corpora directly from a file,
+but than the whole content of a file ends as one document in a corpus. We are
+working with very large corpora (more than 100 MB). In our experience some
+operations on a single document of such size, in particular applying regular
+expressions, are extremely slow. It is much more efficient to keep separate
+logical entries (twits, blog entries etc) as separate small documents in the
+Corpus object.
+
+We define a function that creates a Corpus from the specified file,
+where each line is transformed to a separate document.
+
+```{r}
+loadCorpus <- function(fileName) {
+    # Read file into a character vector.
+    text <- read_lines(fileName)
+
+    # Create a Corpus from the character vector.
+    Corpus(VectorSource(text),
+           readerControl = list(reader = readPlain,
+                                language = "en_US",
+                                load = TRUE))
+}
+```
+
+We also define a function that writes a Corpus to a specified file, assuming
+that each document in the Corpus contains just a single line of text, as it is
+in our case.
+
+```{r}
+writeCorpus <- function(corpus, fileName) {
+    text <- sapply(corpus, function(x) {x})
+    readr::write_lines(text, fileName)
+}
+```
+
+Using just defined function, we load all 3 corpora. Note that we are loading
+only training sub-sets created before.
+
+```{r}
+corpus.blogs <- loadCorpus("data-split/en_US.blogs.training.txt")
+corpus.news <- loadCorpus("data-split/en_US.news.training.txt")
+corpus.twitter <- loadCorpus("data-split/en_US.twitter.training.txt")
+```
+
+The `tm` library provides some functions we will use to clean up the corpora,
+such as `removeNumbers` to remove numbers, or `tolower` to convert text to the
+lower case. Still, we have to define some functions for the clean-up ourselves.
+
+```{r}
+# Remove URLs. The regular expression detects http(s) and ftp(s) protocols.
+removeUrl <- function(x) gsub("(ht|f)tp(s?)://\\S+", "", x)
+
+# Remove e-mail addresses.
+# The regular expression from Stack Overflow:
+# https://stackoverflow.com/questions/201323/how-to-validate-an-email-address-using-a-regular-expression
+removeEmail <- function(x) gsub("(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])", "", x, perl = TRUE)
+
+# Remove hash tags (the character # and the following word) and twitter handles
+# (the character @ and the following word).
+removeTagsAndHandles <- function(x) gsub("[@#]\\S+", "", x)
+
+# Surround punctuation marks which does not appear inside a word with space
+# characters. Without this step, fragments with a missing space are transformed
+# to a single non-existing word when punctuation is removed.
+# Example: corpus contains
+# "I had the best day yesterday,it was like two kids in a candy store"
+# Without this step, "yesterday,it" is transformed to a non-existing word
+# "yesterdayit" when removing punctuation. This step transforms it to
+# "yesterday, it"
+addMissingSpace <- function(x) gsub("[,()\":;”…]", " ", x)
+
+# Remove punctuation characters.
+# We are not using tm::removePunctuation because it removes only ASCII
+# punctuation characters, but not extended punctuation characters such as lower
+# quotation marks. Instead we are using a white-list approach: keep only
+# alphabetic characters and space characters.
+removePunctuation <- function(x) gsub("[^[:alpha:][:space:]]", "", x)
+
+# Remove words which are too common and thus not interesting for our model.
+removeStopWords <- function(x) removeWords(x, stopwords(kind = "en"))
+```
+
+Now we may combine all cleanup steps into a single function. The function
+`tm_combine` combines multiple multiple cleanup functions together, executing
+then from right to left. Note that an order of execution is exactly the
+opposite of the order in which functions are included in the list.
+
+```{r}
+preprocessFunctions <- list(
+    stripWhitespace, # Collapse whitespaces
+    stemDocument, # Keep only stems of words
+    removeStopWords, # Remove common words
+    removePunctuation, # Remove punctuation characters except of end-of-sentence
+    addMissingSpace, # Add missing space characters around the punctuation
+    tolower, # Convert to lower case
+    removeNumbers, # Remove numbers
+    removeTagsAndHandles, # Remove hash tags and Twitter handles
+    removeEmail, # Remove URLs
+    removeUrl # Remove e-mail addresses
+)
+```
+
+Now we apply the pre-process function to all 3 corpora.
+
+```{r message=FALSE, warning=FALSE}
+corpus.blogs.pre <- tm_map(corpus.blogs, tm_reduce, preprocessFunctions)
+corpus.news.pre <- tm_map(corpus.news, tm_reduce, preprocessFunctions)
+corpus.twitter.pre <- tm_map(corpus.twitter, tm_reduce, preprocessFunctions)
+```
+
+We export pre-processed corpora to files, so that we may use them for subsequent
+analysis without pre-processing them each time.
+
+```{r}
+writeCorpus(corpus.blogs.pre, "data-split/blogs.training.pre.txt")
+writeCorpus(corpus.news.pre, "data-split/news.training.pre.txt")
+writeCorpus(corpus.twitter.pre, "data-split/twitter.training.pre.txt")
+```
