@@ -1,0 +1,59 @@
+AFAIK,as far as I know
+b/c,because
+bc,because
+BFN,bye for now
+BR,best regards
+BTW,by the way
+DM,direct message
+EM,email
+FAQ,frequently asked questions
+FB,facebook
+FF,follow friday
+FFS, for fuck's sake
+FML,fuck my life
+FTF,face to face
+F2F,face to face
+FTL,for the loss 
+FTW,for the win
+FWD,forward
+FWIW,for what it's worth
+HT,hat tip
+HTH,hope that helps
+IMHO,in my humble opinion
+IMO,in my opinion
+IRL,in real life
+JV,joint venture
+J/K,just kidding
+jk,just kidding
+LI,LinkedIn
+LMAO,laughing my ass off
+LMK,let me know
+LOL,laughing out loud
+MT,modified tweet
+NSFW,not safe for work
+OH,overheard
+OMFG,oh my fucking god
+OMG,oh my god
+PRT,partial retweet
+RE,in reply to
+RR,re-run
+RT,retweet
+RTF,read the frequently asked questions
+RTFM,read the fucking manual
+RTHX,thanks for the retweet
+SNAFU,situation normal all fucked up
+SOB,son of a bitch
+STFU,shut the fuck up
+TMB,tweet me back
+TMI,too much information
+WTF,what the fuck
+WTH,what the hell
+YMMV,your mileage may vary
+YW,you’re welcome
+TIL,today I learned
+ICYMI,in case you missed it
+CX,correction
+RTQ,read the question
+STFW,search the fucking web
+TL,timeline
+
