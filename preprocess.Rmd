@@ -14,7 +14,7 @@ This is a part of the capstone project for the cycle of courses
 offered on [Coursera](https://www.coursera.org) by
 [Johns Hopkins University](https://www.jhu.edu).
 
-We assume that the corpora was already downloaded from a location provided in
+We assume that the corpora were already downloaded from a location provided in
 the course and extracted from the zip file into a local directory. Now we are
 going to clean up the corpora for initial analysis.
 
