@@ -19,7 +19,8 @@ We assume that the corpora were already downloaded and preprocessed.
 We load the required libraries.
 
 ```{r message=FALSE}
-library(tm) # For handling the corpora.
+library(data.table) # For fast data tables (extension of data frames).
+library(quanteda) # For handling the corpora.
 library(readr) # For fast reading/writing.
 library(ggplot2) # For charts.
 library(ggforce) # For charts.
@@ -37,10 +38,7 @@ loadCorpus <- function(fileName) {
     text <- read_lines(fileName)
 
     # Create a Corpus from the character vector.
-    Corpus(VectorSource(text),
-           readerControl = list(reader = readPlain,
-                                language = "en_US",
-                                load = TRUE))
+    corpus(text)
 }
 ```
 
@@ -57,28 +55,27 @@ twitter.corpus <- loadCorpus("data-split/twitter.training.pre.txt")
 In this section we will study distribution of words in corpora, ignoring for the
 moment interaction between words (n-grams).
 
-For each corpus we calculate a Term Document Matrix.
+We define two helper functions. The first one creates a Document Feature Matrix
+(DFM) for words in documents, and aggregates it over all documents to a Feature
+Vector. The second helper function enriches the Feature Vector with additional
+values useful for our analysis, such as cumulated coverage of text. We will
+use the second function later as well, to enrich data on n-grams.
 
 ```{r}
-blogs.tdm <- TermDocumentMatrix(blogs.corpus, control = list())
-news.tdm <- TermDocumentMatrix(news.corpus, control = list())
-twitter.tdm <- TermDocumentMatrix(twitter.corpus, control = list())
-all.tdm <- c(blogs.tdm, news.tdm, twitter.tdm)
-```
+# Calculate Document Feature Matrix (DFM) for words in documents, and aggregate
+# it over all documents to a Feature Vector.
+build.1gram.fv <- function(text.corpus) {
+    text.dfm <- dfm(text.corpus)
+    colSums(text.dfm)
+}
 
-We define a function that transforms a Term Document Matrix into a table
-with frequency of each unique word, and with a cumulative percentage. We will
-use the cumulative percentage to estimate how many unique words we require
-to achieve a particular text coverage (for example, to cover 95% of the text).
-
-```{r}
-# Build a table with word frequency from the specified Term Document Matrix.
-buildWordFreq <- function(tdm) {
-    # Collapse TDM, aggregating count of words in all documents.
-    tdm <- slam::rollup(tdm, 2)
-
-    # Transform TDM to a table and sort by frequency descending.
-    tbl <- data.table::data.table(Terms = tdm$dimnames$Terms[tdm$i], Freq = tdm$v)
+# Sorts a Feature Vector in descending order of frequency and enriches it with
+# additional columns:
+#  * Cumulated frequency of terms (words or n-grams)
+#  * Cumulated frequency as percentage of total.
+enrich.fv <- function(fv) {
+    # Transform Feature Vector to a table and sort by frequency descending.
+    tbl <- data.table(Terms = names(fv), Freq = fv)
     tbl <- tbl[order(-Freq)]
 
     # Add columns with cumulative frequency as a number of words, and as percentage.
@@ -93,10 +90,10 @@ Now we may calculate frequency of words in each source, as well as in all source
 together (aggregated).
 
 ```{r}
-blogs.freq <- buildWordFreq(blogs.tdm)
-news.freq <- buildWordFreq(news.tdm)
-twitter.freq <- buildWordFreq(twitter.tdm)
-all.freq <- buildWordFreq(all.tdm)
+blogs.freq <- enrich.fv(build.1gram.fv(blogs.corpus))
+news.freq <- enrich.fv(build.1gram.fv(news.corpus))
+twitter.freq <- enrich.fv(build.1gram.fv(twitter.corpus))
+all.freq <- enrich.fv(build.1gram.fv(blogs.corpus + news.corpus + twitter.corpus))
 ```
 
 The following chart displays 20 most-frequent words in each source, as well
