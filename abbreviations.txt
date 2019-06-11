@@ -56,4 +56,5 @@ CX,correction
 RTQ,read the question
 STFW,search the fucking web
 TL,timeline
-
+TL;DR,too long didn’t read
+TT,translated tweet
