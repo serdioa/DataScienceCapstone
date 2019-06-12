@@ -1,0 +1,331 @@
+---
+title: "Analyzing the Corpora"
+author: "Alexey Serdyuk"
+date: "9 June 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a part of the capstone project for the cycle of courses
+[Data Science Specialization](https://www.coursera.org/specializations/jhu-data-science)
+offered on [Coursera](https://www.coursera.org) by
+[Johns Hopkins University](https://www.jhu.edu).
+
+We assume that the corpora were already downloaded and preprocessed.
+
+We load the required libraries.
+
+```{r message=FALSE}
+library(data.table) # For fast data tables (extension of data frames).
+library(quanteda) # For handling the corpora.
+library(readr) # For fast reading/writing.
+library(ggplot2) # For charts.
+library(ggforce) # For charts.
+library(grid) # For arranging charts in a grid.
+library(gridExtra) # For arranging charts in a grid.
+library(kableExtra) # For formatting tables.
+```
+
+We define a function that creates a Corpus from the specified file,
+where each line is transformed to a separate document.
+
+```{r}
+loadCorpus <- function(fileName) {
+    # Read file into a character vector.
+    text <- read_lines(fileName)
+
+    # Create a Corpus from the character vector.
+    corpus(text)
+}
+```
+
+Using just defined function, we load pre-processed corpora.
+
+```{r}
+blogs.corpus <- loadCorpus("data-split/blogs.training.pre.txt")
+news.corpus <- loadCorpus("data-split/news.training.pre.txt")
+twitter.corpus <- loadCorpus("data-split/twitter.training.pre.txt")
+```
+
+## Distribution of bigrams
+
+In this section we will study distribution bigrams, that is combinations of
+two words.
+
+We define two helper functions. The first one creates a Document Feature Matrix
+(DFM) for n-grams in documents, and aggregates it over all documents to a Feature
+Vector. The second helper function enriches the Feature Vector with additional
+values useful for our analysis, such as cumulated coverage of text.
+
+```{r}
+# Calculate Document Feature Matrix (DFM) for n-grams in documents, and aggregate
+# it over all documents to a Feature Vector.
+build.ngram.fv <- function(text.corpus, n) {
+    text.ngrams <- tokens(text.corpus, ngrams = n, concatenator = " ")
+    text.dfm <- dfm(text.ngrams)
+    colSums(text.dfm)
+}
+
+# Sorts a Feature Vector in descending order of frequency and enriches it with
+# additional columns:
+#  * Cumulated frequency of terms (words or n-grams)
+#  * Cumulated frequency as percentage of total.
+enrich.fv <- function(fv) {
+    # Transform Feature Vector to a table and sort by frequency descending.
+    tbl <- data.table(Terms = names(fv), Freq = fv)
+    tbl <- tbl[order(-Freq)]
+
+    # Add columns with cumulative frequency as a number of words, and as percentage.
+    tbl$Freq.Cum <- cumsum(tbl$Freq)
+    tbl$Freq.Pct <- tbl$Freq.Cum / sum(tbl$Freq)
+
+    return (tbl)
+}
+```
+
+Now we may calculate frequency of bigrams in each source, as well as in all sources
+together (aggregated).
+
+```{r}
+blogs.2gram.freq <- enrich.fv(build.ngram.fv(blogs.corpus, 2))
+news.2gram.freq <- enrich.fv(build.ngram.fv(news.corpus, 2))
+twitter.2gram.freq <- enrich.fv(build.ngram.fv(twitter.corpus, 2))
+all.2gram.freq <- enrich.fv(build.ngram.fv(blogs.corpus + news.corpus + twitter.corpus, 2))
+```
+
+The following chart displays 20 most-frequent bigrams in each source, as well
+as in the aggregated corpora.
+
+```{r echo=FALSE, fig.align='center', fig.width=10, fig.height=8}
+blogs.freq.top <- blogs.2gram.freq[1:20]
+blogs.freq.top$Terms <- factor(blogs.freq.top$Terms,
+                               levels = blogs.freq.top[order(20:1)]$Terms)
+
+news.freq.top <- news.2gram.freq[1:20]
+news.freq.top$Terms <- factor(news.freq.top$Terms,
+                              levels = news.freq.top[order(20:1)]$Terms)
+
+twitter.freq.top <- twitter.2gram.freq[1:20]
+twitter.freq.top$Terms <- factor(twitter.freq.top$Terms,
+                                 levels = twitter.freq.top[order(20:1)]$Terms)
+
+all.freq.top <- all.2gram.freq[1:20]
+all.freq.top$Terms <- factor(all.freq.top$Terms,
+                             levels = all.freq.top[order(20:1)]$Terms)
+
+g.blogs <- ggplot(blogs.freq.top, aes(x = Terms, y = Freq, fill = as.integer(Terms))) +
+    geom_bar(stat = 'identity') +
+    scale_fill_gradient(low = "#CC8888", high = "#CC0000") +
+    coord_flip() +
+    labs(x = "Word") +
+    labs(y = "Count") +
+    labs(title = "Blogs") +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+
+g.news <- ggplot(news.freq.top, aes(x = Terms, y = Freq, fill = as.integer(Terms))) +
+    geom_bar(stat = 'identity') +
+    scale_fill_gradient(low = "#88CC88", high = "#00CC00") +
+    coord_flip() +
+    labs(x = "Word") +
+    labs(y = "Count") +
+    labs(title = "News") +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+
+g.twitter <- ggplot(twitter.freq.top, aes(x = Terms, y = Freq, fill = as.integer(Terms))) +
+    geom_bar(stat = 'identity') +
+    scale_fill_gradient(low = "#8888CC", high = "#0000CC") +
+    coord_flip() +
+    labs(x = "Word") +
+    labs(y = "Count") +
+    labs(title = "Twitter") +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+
+g.all <- ggplot(all.freq.top, aes(x = Terms, y = Freq, fill = as.integer(Terms))) +
+    geom_bar(stat = 'identity') +
+    scale_fill_gradient2(low = "#8888CC", mid = "#44CC44", high = "#CC0000", midpoint = 10) +
+    coord_flip() +
+    labs(x = "Word") +
+    labs(y = "Count") +
+    labs(title = "Aggregated") +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+
+
+grid.arrange(grobs = list(g.blogs, g.news, g.twitter, g.all),
+             widths = c(1, 1, 1),
+             layout_matrix = rbind(c(1, 2, 3),
+                                   c(NA, 4, NA)),
+             top = textGrob("Top 20 Bigrams", gp = gpar(fontsize=20)))
+```
+
+We immediately see a difference with lists of top 20 words: there were much more
+common words between sources, as there are common bigrams. There are still
+some common bigrams, but the intersection is smaller.
+
+Similar to how we proceed with words, now we will analyze intersections, that is
+we will find how many bigrams are common to all sources, and how many are unique
+to a particular source. We also calculate a percentage of the whole source
+covered by a particular subset of all bigrams.
+
+The following [Venn diagram](https://en.wikipedia.org/wiki/Venn_diagram) shows
+a number of unique bigrams used in each source, as well as a percentage
+of the aggregated corpora covered by those bigrams.
+
+```{r echo=FALSE, fig.align='center'}
+all.venn <- data.frame(
+    "Terms" = all.2gram.freq$Terms,
+    "Freq" = all.2gram.freq$Freq,
+    "Blogs" = all.2gram.freq$Terms %in% blogs.2gram.freq$Terms,
+    "News" = all.2gram.freq$Terms %in% news.2gram.freq$Terms,
+    "Twitter" = all.2gram.freq$Terms %in% twitter.2gram.freq$Terms
+)
+all.venn$B <- (all.venn$Blogs & !all.venn$News & !all.venn$Twitter)
+all.venn$N <- (!all.venn$Blogs & all.venn$News & !all.venn$Twitter)
+all.venn$T <- (!all.venn$Blogs & !all.venn$News & all.venn$Twitter)
+all.venn$BN <- (all.venn$Blogs & all.venn$News & !all.venn$Twitter)
+all.venn$BT <- (all.venn$Blogs & !all.venn$News & all.venn$Twitter)
+all.venn$NT <- (!all.venn$Blogs & all.venn$News & all.venn$Twitter)
+all.venn$BNT <- (all.venn$Blogs & all.venn$News & all.venn$Twitter)
+
+df.venn <- data.frame(x = c(0, 0.866, -0.866),
+                      y = c(1, -0.5, -0.5),
+                      labels = c('Blogs', 'News', 'Twitter'))
+df.venn.count <- data.frame(x = c(0, 1.2, 0.8, -1.2, -0.8, 0, 0),
+                            y = c(1.2, -0.6, 0.5, -0.6, 0.5, -1, 0))
+df.venn.count$Counts <- c(sum(all.venn$B),
+                          sum(all.venn$N),
+                          sum(all.venn$BN),
+                          sum(all.venn$T),
+                          sum(all.venn$BT),
+                          sum(all.venn$NT),
+                          sum(all.venn$BNT))
+df.venn.count$Freq <- c(sum(all.venn$Freq[all.venn$B]) / sum(all.venn$Freq),
+                        sum(all.venn$Freq[all.venn$N]) / sum(all.venn$Freq),
+                        sum(all.venn$Freq[all.venn$BN]) / sum(all.venn$Freq),
+                        sum(all.venn$Freq[all.venn$T]) / sum(all.venn$Freq),
+                        sum(all.venn$Freq[all.venn$BT]) / sum(all.venn$Freq),
+                        sum(all.venn$Freq[all.venn$NT]) / sum(all.venn$Freq),
+                        sum(all.venn$Freq[all.venn$BNT]) / sum(all.venn$Freq)
+)
+df.venn.count$Label <- paste0(df.venn.count$Counts, "\n",
+                              sprintf("%.2f%%", df.venn.count$Freq * 100))
+
+ggplot(df.venn) +
+    geom_circle(aes(x0 = x, y0 = y, r = 1.5, fill = labels),
+                alpha = .3, size = 1, colour = "#666666") +
+    coord_fixed() +
+    theme_void(base_size = 14) +
+    theme(legend.position = 'bottom') +
+    scale_fill_manual(values = c("#CC0000", "#008800", "#0000FF")) +
+    scale_colour_manual(values = c("#CC0000", "#008800", "#0000FF"), guide = FALSE) +
+    labs(title = "Bigrams Common in Multiple Corpora") +
+    labs(fill = NULL) +
+    annotate("text", x = df.venn.count$x, y = df.venn.count$y, label = df.venn.count$Label, size = 5)
+```
+
+The difference between words and bigrams is even more pronounced here.
+Bigrams common to all sources cover just
+`r sprintf("%.2f%%", df.venn.count$Freq[7] * 100)` of the text, compared to
+more than 96% covered by words common to all sources.
+
+The next step in our analysis is to find out how many common bigrams we should
+choose to achieve a decent coverage of the text.
+
+The following chart shows a number of unique bigrams in each source which cover
+particular percentage of the text. For example, 1000 most-frequent bigrams cover
+`r sprintf("%.2f%%", twitter.2gram.freq[1000]$Freq.Pct * 100)` of the Twitter corpus.
+
+```{r echo=FALSE, fig.align='center', fig.width=10}
+# Cumulated frequency chart
+blogs.freq.pct <- data.frame("Source" = rep("Blogs", nrow(blogs.2gram.freq)),
+                             "Count" = 1:nrow(blogs.2gram.freq),
+                             "Freq.Pct" = blogs.2gram.freq$Freq.Pct)
+
+news.freq.pct <- data.frame("Source" = rep("News", nrow(news.2gram.freq)),
+                            "Count" = 1:nrow(news.2gram.freq),
+                            "Freq.Pct" = news.2gram.freq$Freq.Pct)
+
+twitter.freq.pct <- data.frame("Source" = rep("Twitter", nrow(twitter.2gram.freq)),
+                               "Count" = 1:nrow(twitter.2gram.freq),
+                               "Freq.Pct" = twitter.2gram.freq$Freq.Pct)
+
+all.freq.pct <- data.frame("Source" = rep("All", nrow(all.2gram.freq)),
+                           "Count" = 1:nrow(all.2gram.freq),
+                           "Freq.Pct" = all.2gram.freq$Freq.Pct)
+
+stat.freq.pct <- rbind(blogs.freq.pct, news.freq.pct, twitter.freq.pct, all.freq.pct)
+
+ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct, group = Source)) +
+    scale_x_continuous(trans = "log10",
+                       breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                       labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+    scale_color_manual(values=c("#CC0000", "#008800", "#0000FF", "#666666")) +
+    geom_line(aes(color = Source), size = 1.1) +
+    labs(title = "Cumulative Frequency of Bigrams") +
+    labs(x = "Unique bigrams") +
+    labs(y = "Cumulative Frequency, %") +
+    theme_bw(base_size = 14) 
+```
+
+
+```{r echo=FALSE}
+
+all.freq.tbl <-
+    data.frame(
+        "Corpora Coverage" = c("75%", "90%", "95%", "99%", "99.9%"),
+        "Blogs" = c(
+            nrow(blogs.2gram.freq[blogs.2gram.freq$Freq.Pct <= 0.75]),
+            nrow(blogs.2gram.freq[blogs.2gram.freq$Freq.Pct <= 0.90]),
+            nrow(blogs.2gram.freq[blogs.2gram.freq$Freq.Pct <= 0.95]),
+            nrow(blogs.2gram.freq[blogs.2gram.freq$Freq.Pct <= 0.99]),
+            nrow(blogs.2gram.freq[blogs.2gram.freq$Freq.Pct <= 0.999])
+        ),
+        "News" = c(
+            nrow(news.2gram.freq[news.2gram.freq$Freq.Pct <= 0.75]),
+            nrow(news.2gram.freq[news.2gram.freq$Freq.Pct <= 0.90]),
+            nrow(news.2gram.freq[news.2gram.freq$Freq.Pct <= 0.95]),
+            nrow(news.2gram.freq[news.2gram.freq$Freq.Pct <= 0.99]),
+            nrow(news.2gram.freq[news.2gram.freq$Freq.Pct <= 0.999])
+        ),
+        "Twitter" = c(
+            nrow(twitter.2gram.freq[twitter.2gram.freq$Freq.Pct <= 0.75]),
+            nrow(twitter.2gram.freq[twitter.2gram.freq$Freq.Pct <= 0.90]),
+            nrow(twitter.2gram.freq[twitter.2gram.freq$Freq.Pct <= 0.95]),
+            nrow(twitter.2gram.freq[twitter.2gram.freq$Freq.Pct <= 0.99]),
+            nrow(twitter.2gram.freq[twitter.2gram.freq$Freq.Pct <= 0.999])
+        ),
+        "Aggregated" = c(
+            nrow(all.2gram.freq[all.2gram.freq$Freq.Pct <= 0.75]),
+            nrow(all.2gram.freq[all.2gram.freq$Freq.Pct <= 0.90]),
+            nrow(all.2gram.freq[all.2gram.freq$Freq.Pct <= 0.95]),
+            nrow(all.2gram.freq[all.2gram.freq$Freq.Pct <= 0.99]),
+            nrow(all.2gram.freq[all.2gram.freq$Freq.Pct <= 0.999])
+        )
+    )
+kable(all.freq.tbl, booktabs = TRUE,
+      col.names = c("Corpora Coverage",
+                    "Blogs",
+                    "News",
+                    "Twitter",
+                    "Aggregated")) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+The table shows that in order to cover 95% of blogs, we require
+`r sprintf("%d", all.freq.tbl$Blogs[3])` bigrams The same coverage of news
+require `r sprintf("%d", all.freq.tbl$News[3])` bigrams, and the coverage
+of twitter `r sprintf("%d", all.freq.tbl$Twitter[3])` bigrams To cover 95%
+of the aggregated corpora, we require
+`r sprintf("%d", all.freq.tbl$Aggregated[3])` bigrams.
+
+The chart is also very different from a similar chart for words. The curve
+for words had an "S"-shape, that is it's growth slowed down after some number
+of words, so that adding more words resulted in diminishing returns. For bigrams,
+there are no diminishing returns: curves are just rising.
