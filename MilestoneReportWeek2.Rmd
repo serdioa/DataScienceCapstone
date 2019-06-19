@@ -1,0 +1,396 @@
+---
+title: "Data Science Capstone Project: Milestone Report"
+author: "Alexey Serdyuk"
+date: "16/06/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Table of content
+
+* [Synopsis](#synopsis)
+* [Prerequisites](#prerequisites)
+* [Obtaining the data](#obtaining_data)
+* [Splitting the data](#splitting_data)
+* [First glance on the data and general plan](#first_glance)
+* [Cleaning up and preprocessing the corpus](#cleaning_preprocessing)
+
+# <a name="synopsis"></a>Synopsis
+
+This is a milestone report for Week 2 of the capstone project for the cycle of courses
+[Data Science Specialization](https://www.coursera.org/specializations/jhu-data-science)
+offered on [Coursera](https://www.coursera.org) by
+[Johns Hopkins University](https://www.jhu.edu).
+
+The purpose of the capstone project is to build a Natural Language Processing
+(NLP) application, that, given a chunk of text, predicts the next most probable
+word. The application may be used, for example, in mobile devided to provide
+suggestions as the user tips in some text.
+
+In this report we will provide initial analysis of the data, as well as discuss
+approach to building the application.
+
+# <a name="prerequisites"></a>Prerequisites
+
+An important question is which library to use for processing and analyzing the
+corpora, as R provides several alternatives. Initially we attempted to use
+the library `tm`, but quickly found that the library is very memory-hungry,
+and an attempt to build bi- or trigrams for a large corpus are not practical.
+After some googling we decided to use the library `quanteda` instead.
+
+Too keep our namespace relatively clean, we load only those libraries from
+which we use many functions, or if we use the same function many times.
+Otherwise we will use full syntax, for example `stopwords::stopwords()`.
+
+We start by loading required libraries.
+
+```{r message=FALSE}
+library(kableExtra) # For pretty-printing tables.
+library(parallel) # For parallel processing.
+library(quanteda) # For handling the corpora.
+library(readr) # For fast reading/writing.
+library(R.utils) # For counting lines in files.
+``` 
+
+To speed up processing of large data sets, we will apply parallel version of
+`lapply` function from the library `parallel`. To use all the available
+resources, we detect a number of CPU cores and configure the library to use
+them all.
+
+```{r}
+cpu.cores <- detectCores()
+options(mc.cores = cpu.cores)
+``` 
+
+# <a name="obtaining_data"></a>Obtaining the data
+
+Here and many times later we use caching to speed up rendering of this document.
+Results of long-running operations are stored, and used again during the next
+run. If you wish to re-run all operations, just remove the `cache` directory.
+
+```{r}
+if (!dir.exists("cache")) {
+    dir.create("cache")
+}
+``` 
+
+We download the data from the URL provided in the course description, and unzip
+it.
+
+```{r}
+if (!file.exists("cache/Coursera-SwiftKey.zip")) {
+    download.file(url = "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip",
+                  destfile = "cache/Coursera-SwiftKey.zip", method = "curl")
+    unzip("cache/Coursera-SwiftKey.zip", exdir = "cache")
+}
+```
+
+# <a name="splitting_data"></a>Splitting the data
+
+The downloaded zip file contains corpora in several languages: English, German,
+Russian and Finnish. In our project we will use only English corpora.
+
+Corpora in each language, including English, contains 3 files with content
+obtained from different sources: news, blogs and twitter.
+
+As the first step, we will split each relevant file on 3 parts:
+
+* Training set (60%) will be used to build and train the algorithm.
+* Testing set (20%) will be used to test the algorithm during it's development.
+This set may be used more than once.
+* Validation set (20%) will be used for a final validation and estimation
+of out-of-sample performance. This set will be used only once.
+
+We define a function which splits the specified file on parts described above:
+
+```{r}
+# Arguments:
+# name - the file to split
+# out.dir - output directory
+splitFile <- function(name, out.dir) {
+    # Reading dataset from the input file.
+    data <- read_lines(name)
+
+    # Prepare list with indexes of all data items.
+    data.index <- 1:length(data)
+
+    # Sample indices for the training data set, and create a set with remaining
+    # indices.
+    training.index <- sample(data.index, 0.6 * length(data.index))
+    remaining.index <- data.index[! data.index %in% training.index]
+
+    # Sample indices for the testing data set, and use remaining indices
+    # for a validation data set.
+    testing.index <- sample(remaining.index, 0.5 * length(remaining.index))
+    validation.index <- remaining.index[! remaining.index %in% testing.index]
+
+    # Split the data.
+    data.training <- data[training.index]
+    data.testing <- data[testing.index]
+    data.validation <- data[validation.index]
+    
+    # Create an output directory, if it does not exist.
+    if (!dir.exists(out.dir)) {
+        dir.create(out.dir)
+    }
+    
+    # Prepare names for output files. We append suffixes "training", "testing"
+    # and "validation" to the input file name before the extension.
+    base <- basename(name)
+    outTraining <- file.path(out.dir, sub("(.)\\.[^.]+$", "\\1.training.txt", base))
+    outTesting <- file.path(out.dir, sub("(.)\\.[^.]+$", "\\1.testing.txt", base))
+    outValidation <- file.path(out.dir, sub("(.)\\.[^.]+$", "\\1.validation.txt", base))
+
+    # Writing datasets to output files.
+    write_lines(data.training, outTraining)
+    write_lines(data.testing, outTesting)
+    write_lines(data.validation, outValidation)
+}
+```
+
+To make results reproduceable, we set the seed of the random number generator.
+
+```{r}
+set.seed(20190530)
+```
+
+Finally, we split each of the data files.
+
+```{r}
+if (!file.exists("cache/en_US.blogs.training.txt")) {
+    splitFile("cache/final/en_US/en_US.blogs.txt", "cache")
+}
+if (!file.exists("cache/en_US.news.training.txt")) {
+    splitFile("cache/final/en_US/en_US.news.txt", "cache")
+}
+if (!file.exists("cache/en_US.twitter.training.txt")) {
+    splitFile("cache/final/en_US/en_US.twitter.txt", "cache")
+}
+```
+
+As a sanity check, we count a number of lines in each source file, as well in
+the partial files produced by the split.
+
+```{r countLines, message=FALSE, cache=TRUE}
+count.blogs <- R.utils::countLines("cache/final/en_US/en_US.blogs.txt")
+count.blogs.training <- R.utils::countLines("cache/en_US.blogs.training.txt")
+count.blogs.testing <- R.utils::countLines("cache/en_US.blogs.testing.txt")
+count.blogs.validation <- R.utils::countLines("cache/en_US.blogs.validation.txt")
+
+count.news <- R.utils::countLines("cache/final/en_US/en_US.news.txt")
+count.news.training <- R.utils::countLines("cache/en_US.news.training.txt")
+count.news.testing <- R.utils::countLines("cache/en_US.news.testing.txt")
+count.news.validation <- R.utils::countLines("cache/en_US.news.validation.txt")
+
+count.twitter <- R.utils::countLines("cache/final/en_US/en_US.twitter.txt")
+count.twitter.training <- R.utils::countLines("cache/en_US.twitter.training.txt")
+count.twitter.testing <- R.utils::countLines("cache/en_US.twitter.testing.txt")
+count.twitter.validation <- R.utils::countLines("cache/en_US.twitter.validation.txt")
+```
+
+```{r showCountLines, echo=FALSE, cache=TRUE, dependson=countLines}
+corpora.count <- data.frame(
+  "blogs" = c(count.blogs.training,
+              count.blogs.testing,
+              count.blogs.validation,
+              count.blogs,
+              count.blogs - (count.blogs.training +
+                             count.blogs.testing +
+                             count.blogs.validation)),
+  "blogs.pct" = c(count.blogs.training / count.blogs * 100,
+                  count.blogs.testing / count.blogs * 100,
+                  count.blogs.validation / count.blogs * 100,
+                  count.blogs / count.blogs * 100,
+                  NA),
+  "news" = c(count.news.training,
+             count.news.testing,
+             count.news.validation,
+             count.news,
+             count.news - (count.news.training +
+                           count.news.testing +
+                           count.news.validation)),
+  "news.pct" = c(count.news.training / count.news * 100,
+                 count.news.testing / count.news * 100,
+                 count.news.validation / count.news * 100,
+                 count.news / count.news * 100,
+                 NA),
+  "twitter" = c(count.twitter.training,
+                count.twitter.testing,
+                count.twitter.validation,
+                count.twitter,
+                count.twitter - (count.twitter.training +
+                                 count.twitter.testing +
+                                 count.twitter.validation)),
+  "twitter.pct" = c(count.twitter.training / count.twitter * 100,
+                    count.twitter.testing / count.twitter * 100,
+                    count.twitter.validation / count.twitter * 100,
+                    count.twitter / count.twitter * 100,
+                    NA)
+)
+rownames(corpora.count) <- c("Training", "Testing", "Validation", "Total",
+                             "Control (expected to be 0)")
+kable(corpora.count,
+      booktabs = TRUE,
+      col.names = c("Rows", "%", "Rows", "%", "Rows", "%")) %>%
+    add_header_above(header = c("",
+                                "Blogs" = 2,
+                                "News" = 2,
+                                "Twitter" = 2)) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+As the table shows, we have splitted the data on sub-sets as intended.
+
+# <a name="first_glance"></a>First glance on the data and general plan
+
+In the section above we have already counted a number of lines. Let us load
+training data sets and take a look on the first 3 lines of each data set.
+
+```{r}
+blogs.text <- read_lines("cache/en_US.blogs.training.txt")
+news.text <- read_lines("cache/en_US.news.training.txt")
+twitter.text <- read_lines("cache/en_US.twitter.training.txt")
+```
+
+```{r}
+head(blogs.text, 3)
+head(news.text, 3)
+head(twitter.text, 3)
+```
+
+we could see that the data contains not only words, but also numbers and
+punctuation. The punctuation may be non-ASCII (Unicode), as the first example
+in the blogs sample shows (it contains a character "…", which is different from
+3 ASCII point characters ". . ."). Some lines may contain multiple sentences,
+and probably we have to take this into account.
+
+Here is our plan:
+
+* Split text on sentences.
+* Clean up the corpus: remove non-language parts such as e-mail addresses and
+URLs, etc.
+* Preprocess the corpus: remove punctuation, change all words to lower-case,
+replace words with stems.
+* Analyze distribution of words to decide if we should base our prediction on
+the full dictionary, or just on some sub-set of it.
+* Analyze n-grams for small n.
+
+# <a name="cleaning_preprocessing"></a>Cleaning up and preprocessing the corpus
+
+We decided to split text on sentences and do not attempt to predict words across
+sentence border. On the other hand, we may use information about sentences to
+improve prediction of the first word, because the frequency of the first word
+in a sentence may be very different from an average frequency.
+
+```{r splitOnSentences, cache=TRUE}
+blogs.text <- unlist(tokenizers::tokenize_sentences(blogs.text))
+news.text <- unlist(tokenizers::tokenize_sentences(news.text))
+twitter.text <- unlist(tokenizers::tokenize_sentences(twitter.text))
+```
+
+Libraries contains some functions for cleaning up and pre-processing, but
+for some steps we have to write functions ourselves.
+
+```{r}
+# Remove URLs. The regular expression detects http(s) and ftp(s) protocols.
+removeUrl <- function(x) gsub("(ht|f)tp(s?)://\\S+", "", x)
+
+# Remove e-mail addresses.
+# The regular expression from Stack Overflow:
+# https://stackoverflow.com/questions/201323/how-to-validate-an-email-address-using-a-regular-expression
+removeEmail <- function(x) gsub("(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])", "", x, perl = TRUE)
+
+# Remove hash tags (the character # and the following word) and twitter handles
+# (the character @ and the following word).
+removeTagsAndHandles <- function(x) gsub("[@#]\\S+", "", x)
+
+# Surround punctuation marks which does not appear inside a word with space
+# characters. Without this step, fragments with a missing space are transformed
+# to a single non-existing word when punctuation is removed.
+# Example: corpus contains
+# "I had the best day yesterday,it was like two kids in a candy store"
+# Without this step, "yesterday,it" is transformed to a non-existing word
+# "yesterdayit" when removing punctuation. This step transforms it to
+# "yesterday, it"
+addMissingSpace <- function(x) gsub("[,()\":;”…]", " ", x)
+
+# Replace words in a sentence with replacements available from the table.
+# Keep words which are not in the replacement table "as is".
+# As a side effect, removes punctuation and transforms to a lower case.
+#
+# This step is required for several purposes:
+# * Replace common short forms with full forms, for example "he'll" = "he will"
+replacements.text <- readr::read_csv("replacements.txt",
+    col_names = c("token", "replacement"),
+    col_types = list(col_character(), col_character()))
+
+replaceWords <- function(text, replacements) {
+  # Split text on words.
+  tokens.orig <- tokenizers::tokenize_words(text, simplify = TRUE,
+                                            strip_numeric = TRUE)
+  
+  # Attempt to replace each word.
+  tokens.replaced <- sapply(tokens.orig, function(x) {
+    # Search if a replacement exist.
+    replacement.index <- match(x, replacements$token)
+    if (is.na(replacement.index)) {
+      # Can't find a replacement, fall back on the token itself.
+      return (x)
+    } else {
+      # Replace the token.
+      return (replacements$replacement[replacement.index])
+    }
+  }, USE.NAMES = FALSE)
+  
+  paste(tokens.replaced, collapse = " ")
+}
+
+# Add tokens representing start and end of a sentence.
+# SOS = Start Of Sentence
+# EOS = End Of Sentence
+# When we add these tokens, our text was already transformed to a lower case,
+# so we could easy distinguish upper case special tokens from lower case text.
+addSentenceTokens <- function(x) paste("SOS", x, "EOS")
+
+# Collapse space characters: if there are more than 1 space character in a row,
+# replace with a single one.
+collapseWhitespace <- function(x) gsub("\\s{2,}", " ", x)
+
+# ... And now combine all functions in a pre-processing chain.
+preProcessText <- function(x) {
+    text <- removeUrl(x)
+    text <- removeEmail(text)
+    text <- removeTagsAndHandles(text)
+    text <- addMissingSpace(text)
+    text <- replaceWords(text, replacements.text)
+    text <- addSentenceTokens(text)
+    text <- collapseWhitespace(text)
+}
+```
+
+Now we pre-process the data and cache results.
+
+```{r}
+if (!file.exists("cache/blogs.text.preprocessed.txt")) {
+  blogs.text.preprocessed <- unlist(mclapply(blogs.text, preProcessText))
+  write_lines(blogs.text.preprocessed, "cache/blogs.text.preprocessed.txt")
+} else {
+  blogs.text.preprocessed <- read_lines("cache/blogs.text.preprocessed.txt")
+}
+if (!file.exists("cache/news.text.preprocessed.txt")) {
+  news.text.preprocessed <- unlist(mclapply(news.text, preProcessText))
+  write_lines(news.text.preprocessed, "cache/news.text.preprocessed.txt")
+} else {
+  news.text.preprocessed <- read_lines("cache/news.text.preprocessed.txt")
+}
+if (!file.exists("cache/twitter.text.preprocessed.txt")) {
+  twitter.text.preprocessed <- unlist(mclapply(twitter.text, preProcessText))
+  write_lines(twitter.text.preprocessed, "cache/twitter.text.preprocessed.txt")
+} else {
+  twitter.text.preprocessed <- read_lines("cache/twitter.text.preprocessed.txt")
+}
+```
