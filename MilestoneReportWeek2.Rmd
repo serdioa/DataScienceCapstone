@@ -365,7 +365,7 @@ addSentenceTokens <- function(x) paste("SOS", x, "EOS")
 
 # Collapse space characters: if there are more than 1 space character in a row,
 # replace with a single one.
-collapseWhitespace <- function(x) gsub("\\s{2,}", " ", x)
+collapseWhitespace <- function(x) gsub("\\s+", " ", x)
 
 # ... And now combine all functions in a pre-processing chain.
 preProcessText <- function(x) {
@@ -1037,6 +1037,6 @@ To cover 95% of the aggregated corpora, we require
   
 The chart is also very different from a similar chart for words. The curve for
 words had an "S"-shape, that is it's growth slowed down after some number of
-words, so that adding more words resulted in diminishing returns. For bigrams,
+words, so that adding more words results in diminishing returns. For bigrams,
 there is no point of diminishing returns: curves are just rising.
   
