@@ -19,6 +19,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Cleaning up and preprocessing the corpus](#cleaning_preprocessing)
 * [Analyzing words (1-grams)](#analyze_1_grams)
 * [Analyzing bigrams](#analyze_2_grams)
+* [Pruning bigrams](#prune_2_grams)
 
 # <a name="synopsis"></a>Synopsis
 
@@ -257,7 +258,7 @@ As the table shows, we have splitted the data on sub-sets as intended.
 In the section above we have already counted a number of lines. Let us load
 training data sets and take a look on the first 3 lines of each data set.
 
-```{r}
+```{r loadTradiningData}
 blogs.text <- read_lines("cache/en_US.blogs.training.txt")
 news.text <- read_lines("cache/en_US.news.training.txt")
 twitter.text <- read_lines("cache/en_US.twitter.training.txt")
@@ -381,7 +382,7 @@ preProcessText <- function(x) {
 
 Now we pre-process the data and cache results.
 
-```{r}
+```{r preprocessTrainingData}
 if (!file.exists("cache/blogs.text.preprocessed.txt")) {
   blogs.text.preprocessed <- unlist(mclapply(blogs.text, preProcessText))
   write_lines(blogs.text.preprocessed, "cache/blogs.text.preprocessed.txt")
@@ -477,7 +478,7 @@ enrich.ngram <- function(fv) {
 Now we may calculate frequency of words in each source, as well as in all
 sources together (aggregated).
 
-```{r}
+```{r build1grams}
 # Define stop-words for 1-grams: standard stop words, as well as our special
 # tokens "Start-Of-Sentence" and "End-Of-Sentence".
 stopwords.tokens <- c(stopwords(), "SOS", "EOS")
@@ -636,7 +637,8 @@ df.venn.count$Freq <- c(sum(all.venn$Freq[all.venn$B]) / sum(all.venn$Freq),
                         sum(all.venn$Freq[all.venn$NT]) / sum(all.venn$Freq),
                         sum(all.venn$Freq[all.venn$BNT]) / sum(all.venn$Freq)
 )
-df.venn.count$Label <- paste0(df.venn.count$Counts, "\n",
+df.venn.count$Label <- paste0(formatC(df.venn.count$Counts, big.mark = ",", format = "d"),
+                              "\n",
                               sprintf("%.2f%%", df.venn.count$Freq * 100))
 
 ggplot(df.venn) +
@@ -676,21 +678,32 @@ Twitter corpus. An interesting observation is that Twitter requires less words
 to cover particular percentage of the text, whereas news requires more words.
 
 ```{r cover1grams, echo=FALSE, cache=TRUE, fig.align='center'}
-blogs.freq.pct <- data.frame("Source" = rep("Blogs", nrow(blogs.1gram.freq)),
-                             "Count" = 1:nrow(blogs.1gram.freq),
-                             "Freq.Pct" = blogs.1gram.freq$Freq.Cum.Pct)
+# The data set is very large, it takes too long to render a chart with all
+# data points, and we can't show more sample points as there are pixels anyway.
+# We will choose a sample points and interpolate between them.
+# Since our X-axis has a log scale, we are choosing points to that they equally
+# spaced on a log scale.
 
-news.freq.pct <- data.frame("Source" = rep("News", nrow(news.1gram.freq)),
-                            "Count" = 1:nrow(news.1gram.freq),
-                            "Freq.Pct" = news.1gram.freq$Freq.Cum.Pct)
+blogs.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(blogs.1gram.freq)) / 1000)))
+news.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(news.1gram.freq)) / 1000)))
+twitter.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(twitter.1gram.freq)) / 1000)))
+all.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.1gram.freq)) / 1000)))
 
-twitter.freq.pct <- data.frame("Source" = rep("Twitter", nrow(twitter.1gram.freq)),
-                               "Count" = 1:nrow(twitter.1gram.freq),
-                               "Freq.Pct" = twitter.1gram.freq$Freq.Cum.Pct)
+blogs.freq.pct <- data.frame("Source" = rep("Blogs", length(blogs.freq.idx)),
+                             "Count" = blogs.freq.idx,
+                             "Freq.Pct" = blogs.1gram.freq$Freq.Cum.Pct[blogs.freq.idx])
 
-all.freq.pct <- data.frame("Source" = rep("Aggregated", nrow(all.1gram.freq)),
-                           "Count" = 1:nrow(all.1gram.freq),
-                           "Freq.Pct" = all.1gram.freq$Freq.Cum.Pct)
+news.freq.pct <- data.frame("Source" = rep("News", length(news.freq.idx)),
+                            "Count" = news.freq.idx,
+                            "Freq.Pct" = news.1gram.freq$Freq.Cum.Pct[news.freq.idx])
+
+twitter.freq.pct <- data.frame("Source" = rep("Twitter", length(twitter.freq.idx)),
+                               "Count" = twitter.freq.idx,
+                               "Freq.Pct" = twitter.1gram.freq$Freq.Cum.Pct[twitter.freq.idx])
+
+all.freq.pct <- data.frame("Source" = rep("Aggregated", length(all.freq.idx)),
+                           "Count" = all.freq.idx,
+                           "Freq.Pct" = all.1gram.freq$Freq.Cum.Pct[all.freq.idx])
 
 stat.freq.pct <- rbind(blogs.freq.pct, news.freq.pct, twitter.freq.pct, all.freq.pct)
 
@@ -707,8 +720,8 @@ ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct, group = Source)) +
   theme_bw(base_size = 14)
 ```
 
-```{r echo=FALSE}
-all.freq.tbl <-
+```{r cover1grams.tbl, echo=FALSE, cache=TRUE}
+all.1gram.freq.tbl <-
     data.frame(
         "Corpora Coverage" = c("75%", "90%", "95%", "99%", "99.9%"),
         "Blogs" = c(
@@ -740,7 +753,12 @@ all.freq.tbl <-
             nrow(all.1gram.freq[all.1gram.freq$Freq.Cum.Pct <= 0.999])
         )
     )
-kable(all.freq.tbl, booktabs = TRUE,
+all.1gram.freq.tbl[,2] <- formatC(all.1gram.freq.tbl[,2], big.mark = ",", format = "d")
+all.1gram.freq.tbl[,3] <- formatC(all.1gram.freq.tbl[,3], big.mark = ",", format = "d")
+all.1gram.freq.tbl[,4] <- formatC(all.1gram.freq.tbl[,4], big.mark = ",", format = "d")
+all.1gram.freq.tbl[,5] <- formatC(all.1gram.freq.tbl[,5], big.mark = ",", format = "d")
+
+kable(all.1gram.freq.tbl, booktabs = TRUE,
       col.names = c("Corpora Coverage",
                     "Blogs",
                     "News",
@@ -751,11 +769,11 @@ kable(all.freq.tbl, booktabs = TRUE,
 ```
 
 The table shows that in order to cover 95% of blogs, we require
-`r sprintf("%d", all.freq.tbl$Blogs[3])` words. The same coverage of news
-require `r sprintf("%d", all.freq.tbl$News[3])` words, and the coverage
-of twitter `r sprintf("%d", all.freq.tbl$Twitter[3])` words. To cover 95%
+`r all.1gram.freq.tbl$Blogs[3]` words. The same coverage of news
+require `r all.1gram.freq.tbl$News[3]` words, and the coverage
+of twitter `r all.1gram.freq.tbl$Twitter[3]` words. To cover 95%
 of the aggregated corpora, we require
-`r sprintf("%d", all.freq.tbl$Aggregated[3])` unique words. We may use this fact
+`r all.1gram.freq.tbl$Aggregated[3]` unique words. We may use this fact
 later to reduce a number of n-grams required for predictions.
 
 # <a name="analyze_2_grams"></a>Analyzing bigrams
@@ -766,7 +784,7 @@ two words.
 Using previously defined functions, we may calculate frequency of bigrams in
 each source, as well as in all sources together (aggregated).
 
-```{r}
+```{r build2grams}
 # Calculate a frequency of words in each sources, as well as an aggregated.
 if (file.exists("cache/blogs.2gram.freq.RDS")) {
   blogs.2gram.freq <- readRDS("cache/blogs.2gram.freq.RDS")
@@ -921,7 +939,8 @@ df.venn.count$Freq <- c(sum(all.venn$Freq[all.venn$B]) / sum(all.venn$Freq),
                         sum(all.venn$Freq[all.venn$NT]) / sum(all.venn$Freq),
                         sum(all.venn$Freq[all.venn$BNT]) / sum(all.venn$Freq)
 )
-df.venn.count$Label <- paste0(df.venn.count$Counts, "\n",
+df.venn.count$Label <- paste0(formatC(df.venn.count$Counts, big.mark = ",", format = "d"),
+                              "\n",
                               sprintf("%.2f%%", df.venn.count$Freq * 100))
 
 ggplot(df.venn) +
@@ -939,7 +958,7 @@ ggplot(df.venn) +
 The difference between words and bigrams is even more pronounced here.
 Bigrams common to all sources cover just
 `r sprintf("%.2f%%", df.venn.count$Freq[7] * 100)` of the text, compared to
-more than 96% covered by words common to all sources.
+more than 95% covered by words common to all sources.
 
 The next step in our analysis is to find out how many common bigrams we should
 choose to achieve a decent coverage of the text.
@@ -950,25 +969,34 @@ particular percentage of the text. For example, 1000 most-frequent bigrams cover
 Twitter corpus.
 
 ```{r cover2grams, echo=FALSE, cache=TRUE, fig.align='center', fig.width=10}
-# Cumulated frequency chart
-blogs.freq.pct <- data.frame("Source" = rep("Blogs", nrow(blogs.2gram.freq)),
-                             "Count" = 1:nrow(blogs.2gram.freq),
-                             "Freq.Pct" = blogs.2gram.freq$Freq.Cum.Pct)
+# The data set is very large, it takes too long to render a chart with all
+# data points, and we can't show more sample points as there are pixels anyway.
+# We will choose a sample points and interpolate between them.
+# Since our X-axis has a log scale, we are choosing points to that they equally
+# spaced on a log scale.
 
-news.freq.pct <- data.frame("Source" = rep("News", nrow(news.2gram.freq)),
-                            "Count" = 1:nrow(news.2gram.freq),
-                            "Freq.Pct" = news.2gram.freq$Freq.Cum.Pct)
+blogs.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(blogs.2gram.freq)) / 1000)))
+news.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(news.2gram.freq)) / 1000)))
+twitter.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(twitter.2gram.freq)) / 1000)))
+all.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.2gram.freq)) / 1000)))
 
-twitter.freq.pct <- data.frame("Source" = rep("Twitter", nrow(twitter.2gram.freq)),
-                               "Count" = 1:nrow(twitter.2gram.freq),
-                               "Freq.Pct" = twitter.2gram.freq$Freq.Cum.Pct)
+blogs.freq.pct <- data.frame("Source" = rep("Blogs", length(blogs.freq.idx)),
+                             "Count" = blogs.freq.idx,
+                             "Freq.Pct" = blogs.2gram.freq$Freq.Cum.Pct[blogs.freq.idx])
 
-all.freq.pct <- data.frame("Source" = rep("Aggregated", nrow(all.2gram.freq)),
-                           "Count" = 1:nrow(all.2gram.freq),
-                           "Freq.Pct" = all.2gram.freq$Freq.Cum.Pct)
+news.freq.pct <- data.frame("Source" = rep("News", length(news.freq.idx)),
+                            "Count" = news.freq.idx,
+                            "Freq.Pct" = news.2gram.freq$Freq.Cum.Pct[news.freq.idx])
+
+twitter.freq.pct <- data.frame("Source" = rep("Twitter", length(twitter.freq.idx)),
+                               "Count" = twitter.freq.idx,
+                               "Freq.Pct" = twitter.2gram.freq$Freq.Cum.Pct[twitter.freq.idx])
+
+all.freq.pct <- data.frame("Source" = rep("Aggregated", length(all.freq.idx)),
+                           "Count" = all.freq.idx,
+                           "Freq.Pct" = all.2gram.freq$Freq.Cum.Pct[all.freq.idx])
 
 stat.freq.pct <- rbind(blogs.freq.pct, news.freq.pct, twitter.freq.pct, all.freq.pct)
-
 
 ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct, group = Source)) +
   scale_x_continuous(trans = "log10",
@@ -982,7 +1010,7 @@ ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct, group = Source)) +
   theme_bw(base_size = 14)
 ```
 
-```{r echo=FALSE}
+```{r cover2grams.tbl, echo=FALSE, cache=TRUE}
 
 all.freq.tbl <-
     data.frame(
@@ -1016,6 +1044,11 @@ all.freq.tbl <-
             nrow(all.2gram.freq[all.2gram.freq$Freq.Cum.Pct <= 0.999])
         )
     )
+all.freq.tbl[,2] <- formatC(all.freq.tbl[,2], big.mark = ",", format = "d")
+all.freq.tbl[,3] <- formatC(all.freq.tbl[,3], big.mark = ",", format = "d")
+all.freq.tbl[,4] <- formatC(all.freq.tbl[,4], big.mark = ",", format = "d")
+all.freq.tbl[,5] <- formatC(all.freq.tbl[,5], big.mark = ",", format = "d")
+
 kable(all.freq.tbl, booktabs = TRUE,
       col.names = c("Corpora Coverage",
                     "Blogs",
@@ -1039,4 +1072,228 @@ The chart is also very different from a similar chart for words. The curve for
 words had an "S"-shape, that is it's growth slowed down after some number of
 words, so that adding more words results in diminishing returns. For bigrams,
 there is no point of diminishing returns: curves are just rising.
+
+As we have found in the section *[Analyzing words (1-grams)](#analyze_1_grams)*,
+our corpora contains
+$N_1=$ `r formatC(nrow(all.1gram.freq), big.mark = ",", format = "d")`
+unique word stems. Potentially there could be
+$N_1^2=$ `r formatC(nrow(all.1gram.freq)^2, big.mark = ",", format = "fg")`
+bigrams, but we have observed only
+$N_2=$ `r formatC(nrow(all.2gram.freq), big.mark = ",", format = "d")`,
+that is `r sprintf("%.4f%%", 100 * nrow(all.2gram.freq) / (nrow(all.1gram.freq)^2))`
+of all possible. Still, the number of observed bigrams is pretty large.
+In the section *[Analyzing words (1-grams)](#analyze_1_grams)* we have found
+that we may cover large part of the corpus by relatively small number of unique
+word stems. In the next section we will see if we may reduce a number of unique
+2-grams by utilizing that knowledge.
+
+# <a name="prune_2_grams"></a>Pruning bigrams
+
+We have found in the section *[Analyzing words (1-grams)](#analyze_1_grams)*,
+that our corpora contains
+$N_1=$ `r formatC(nrow(all.1gram.freq), big.mark = ",", format = "d")`
+unique word stems, but just `r all.1gram.freq.tbl$Aggregated[3]` of them cover
+95% of the corpus. In this section we will analyze whether we may reduce
+a number of bigrams by utilizing that knowledge.
+
+We will replace seldom words with a speial token `UNK`. This will reduce a
+number of bigrams, because different word sequences may now produce the same
+bigram, if those word sequences contains seldom words. For example, our word
+list contains names "Andrei", "Charley" and "Fabio", but these words do not
+belong to a subset of most common words required to achieve 95% coverage of the
+corpus. If our corpus contains bigrams "Andrei told", "Charley told" and "Fabio
+told", we will replace them all with a bigram "UNK told".
+
+Since we will apply the same approach to 3-grams, 4-grams etc, to save time
+we prune the corpora once and save results to files which we may load later.
+
+We start by defining a function that accepts a sequence of words, a white-list
+and a replacement token. All words in the sentence which are not included
+in the white-list are replaced by the token.
+
+```{r}
+# Replace words not in the provided white-list with a replacement token.
+replaceWordsNotIn <- function(text, whitelist, replacement) {
+  # Split text on words.
+  tokens.orig <- unlist(tokens(text))
+
+  # Stem words.
+  tokens.stem <- SnowballC::wordStem(tokens.orig, language = "en")
+
+  # Check each stem against a whitelist.
+  tokens.replaced <- mapply(function(word.orig, word.stem) {
+    # Search if the stem in the whitelist.
+    replacement.index <- match(word.stem, whitelist)
+    if (is.na(replacement.index)) {
+      # The word is not in the whitelist: replace it.
+      return (replacement)
+    } else {
+      # The word in the whitelist: use the original.
+      return (word.orig)
+    }
+  }, tokens.orig, tokens.stem, SIMPLIFY = TRUE, USE.NAMES = FALSE)
   
+  paste(tokens.replaced, collapse = " ")
+}
+```
+
+Now we create a white-list that contains:
+
+* frequent words which covers 95% of the corpus,
+* stop-words, that is functional words like "a" or "the" which we excluded
+  from our word frequency analysis,
+* special tokens *Stop-Of-Sentence* and *End-Of-Sentence* introduced earlier.
+
+```{r}
+# Calculate 95% of the most common words.
+words.95 <- all.1gram.freq[Freq.Cum.Pct <= 0.95]$Terms
+
+# Keep 95% of the most common words, all stopwords, as well as special tokens
+# SOS/EOS.
+words.whitelist <- c(words.95, stopwords(), "SOS", "EOS")
+```
+
+And now we apply the function defined above to replace all words not included
+in the white-list with the token `UNK`. As usual, we cache produced files to
+speed up repeated rendering of this document.
+
+```{r}
+if (!exists("blogs.text.95")) {
+  if (!file.exists("cache/blogs.text.95.txt")) {
+    blogs.text.95 <- unlist(mclapply(blogs.text.preprocessed,
+                                     replaceWordsNotIn,
+                                     words.whitelist, "UNK"))
+    write_lines(blogs.text.95, "cache/blogs.text.95.txt")
+  } else {
+    blogs.text.95 <- read_lines("cache/blogs.text.95.txt")
+  }
+}
+if (!exists("news.text.95")) {
+  if (!file.exists("cache/news.text.95.txt")) {
+    news.text.95 <- unlist(mclapply(news.text.preprocessed,
+                                    replaceWordsNotIn,
+                                    words.whitelist, "UNK"))
+    write_lines(news.text.95, "cache/news.text.95.txt")
+  } else {
+    news.text.95 <- read_lines("cache/news.text.95.txt")
+  }
+}
+if (!exists("twitter.text.95")) {
+  if (!file.exists("cache/twitter.text.95.txt")) {
+    twitter.text.95 <- unlist(mclapply(twitter.text.preprocessed,
+                                       replaceWordsNotIn,
+                                       words.whitelist, "UNK"))
+    write_lines(twitter.text.95, "cache/twitter.text.95.txt")
+  } else {
+    twitter.text.95 <- read_lines("cache/twitter.text.95.txt")
+  }
+}
+```
+
+After pruning seldom words, we re-calculate bigrams. From now on, we will
+analyze only the aggregated corpus.
+
+```{r}
+  # Calculate frequency of bigrams in pruned source, or load from cache.
+  if (file.exists("cache/all.2gram.95.freq.RDS")) {
+    all.2gram.95.freq <- readRDS("cache/all.2gram.95.freq.RDS")
+  } else {
+    all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
+    all.2gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 2,
+                                                    stop_words = stopwords.tokens))
+    
+    saveRDS(all.2gram.95.freq, "cache/all.2gram.95.freq.RDS")
+  }
+```
+
+The chart shows coverage of corpora by pruned bigrams, where different types
+of bigrams are indicated by different color. The chart also shows for several
+numbers points where bigrams were encountered a particular number of times.
+For example, there are
+`r formatC(nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 30,]), big.mark = ",", format = "d")`
+unique bigrams encountered more than 30 times.
+
+```{r cover2grams.95, echo=FALSE, cache=TRUE, fig.align='center', fig.width=10}
+  # Enrich 2-grams: add columns indicating whether the 1st or 2nd words are
+  # an UNK token.
+  all.2gram.95.freq$UNK_1 <- grepl("UNK \\S+", all.2gram.95.freq$Terms)
+  all.2gram.95.freq$UNK_2 <- grepl("\\S+ UNK", all.2gram.95.freq$Terms)
+  # Enrich 2-grams: add percentage
+  all.2gram.95.freq$Freq.Pct <- all.2gram.95.freq$Freq / sum(all.2gram.95.freq$Freq)
+  #
+  all.2gram.95.freq$WRD_WRD.Freq.Cum.Pct <- cumsum(
+    ifelse(all.2gram.95.freq$UNK_1 | all.2gram.95.freq$UNK_2,
+           0,
+           all.2gram.95.freq$Freq.Pct))
+  all.2gram.95.freq$UNK_WRD.Freq.Cum.Pct <- cumsum(
+    ifelse(all.2gram.95.freq$UNK_1 & !all.2gram.95.freq$UNK_2,
+           all.2gram.95.freq$Freq.Pct,
+           0))
+  all.2gram.95.freq$WRD_UNK.Freq.Cum.Pct <- cumsum(
+    ifelse(!all.2gram.95.freq$UNK_1 & all.2gram.95.freq$UNK_2,
+           all.2gram.95.freq$Freq.Pct,
+           0))
+  all.2gram.95.freq$UNK_UNK.Freq.Cum.Pct <- cumsum(
+    ifelse(all.2gram.95.freq$UNK_1 & all.2gram.95.freq$UNK_2,
+           all.2gram.95.freq$Freq.Pct,
+           0))
+
+  # Use log-scale for sub-sampling the X axis.
+  all.2gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.2gram.95.freq)) / 1000)))
+
+  all.2gram.95.freq.pct <- rbind(
+    data.frame("Type" = rep("UNK UNK", length(all.2gram.95.freq.idx)),
+               "Count" = all.2gram.95.freq.idx,
+               "Freq.Pct" = all.2gram.95.freq$UNK_UNK.Freq.Cum.Pct[all.2gram.95.freq.idx]),
+    data.frame("Type" = rep("UNK Word", length(all.2gram.95.freq.idx)),
+               "Count" = all.2gram.95.freq.idx,
+               "Freq.Pct" = all.2gram.95.freq$UNK_WRD.Freq.Cum.Pct[all.2gram.95.freq.idx]),
+    data.frame("Type" = rep("Word UNK", length(all.2gram.95.freq.idx)),
+               "Count" = all.2gram.95.freq.idx,
+               "Freq.Pct" = all.2gram.95.freq$WRD_UNK.Freq.Cum.Pct[all.2gram.95.freq.idx]),
+    data.frame("Type" = rep("Word Word", length(all.2gram.95.freq.idx)),
+               "Count" = all.2gram.95.freq.idx,
+               "Freq.Pct" = all.2gram.95.freq$WRD_WRD.Freq.Cum.Pct[all.2gram.95.freq.idx])
+  )
+  
+  # How many are there unique bigrams which are encountered more than N times?
+  all.2gram.95.freq.30 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 30,])
+  all.2gram.95.freq.20 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 20,])
+  all.2gram.95.freq.10 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 10,])
+  all.2gram.95.freq.5 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 5,])
+  all.2gram.95.freq.1 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 1,])
+  
+  gp <- ggplot(all.2gram.95.freq.pct,
+               aes(x = Count, y = Freq.Pct, fill = Type)) +
+    scale_x_continuous(trans = "log10",
+                       breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                       labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+    geom_area() + 
+    scale_fill_brewer(palette="Greens", breaks=rev(levels(all.2gram.95.freq.pct$Type))) +
+    geom_segment(aes(x = all.2gram.95.freq.30, y = 0, xend = all.2gram.95.freq.30, yend = 0.5)) +
+    geom_segment(aes(x = all.2gram.95.freq.20, y = 0, xend = all.2gram.95.freq.20, yend = 0.6)) +
+    geom_segment(aes(x = all.2gram.95.freq.10, y = 0, xend = all.2gram.95.freq.10, yend = 0.7)) +
+    geom_segment(aes(x = all.2gram.95.freq.5, y = 0, xend = all.2gram.95.freq.5, yend = 0.8)) +
+    geom_segment(aes(x = all.2gram.95.freq.1, y = 0, xend = all.2gram.95.freq.1, yend = 0.9)) +
+    annotate(geom="text", x=all.2gram.95.freq.30, y=0.52, label="30")+
+    annotate(geom="text", x=all.2gram.95.freq.20, y=0.62, label="20")+
+    annotate(geom="text", x=all.2gram.95.freq.10, y=0.72, label="10")+
+    annotate(geom="text", x=all.2gram.95.freq.5, y=0.82, label="5")+
+    annotate(geom="text", x=all.2gram.95.freq.1, y=0.92, label="1")+
+    labs(title = "Cumulative Frequency of Bigrams") +
+    labs(x = "Unique bigrams") +
+    labs(y = "Cumulative Frequency, %") +
+    theme_bw(base_size = 14) 
+  print(gp)
+
+```
+
+By pruning we have reduced a number of unique bigrams from
+`r formatC(nrow(all.2gram.freq), big.mark = ",", format = "d")` to
+`r formatC(nrow(all.2gram.95.freq), big.mark = ",", format = "d")`,
+that is by `r sprintf("%.2f%%", 100 * (1 - nrow(all.2gram.95.freq) / nrow(all.2gram.freq)))`.
+On this stage it is hard to tell whether pruning makes sense: on one hand, it
+reduces the number of unique 2-grams and thus memory requirements of our
+application, on the other hand it removes information which may be required
+to achieve good prediction rate.
+
