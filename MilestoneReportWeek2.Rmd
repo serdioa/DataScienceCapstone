@@ -20,6 +20,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Analyzing words (1-grams)](#analyze_1_grams)
 * [Analyzing bigrams](#analyze_2_grams)
 * [Pruning bigrams](#prune_2_grams)
+* [3-grams to 6-grams](#3_to_6_grams)
 
 # <a name="synopsis"></a>Synopsis
 
@@ -75,9 +76,10 @@ options(mc.cores = cpu.cores)
 
 # <a name="obtaining_data"></a>Obtaining the data
 
-Here and many times later we use caching to speed up rendering of this document.
-Results of long-running operations are stored, and used again during the next
-run. If you wish to re-run all operations, just remove the `cache` directory.
+Here and at some times later we use caching to speed up rendering of this
+document. Results of long-running operations are stored, and used again during
+the next run. If you wish to re-run all operations, just remove the `cache`
+directory.
 
 ```{r}
 if (!dir.exists("cache")) {
@@ -167,7 +169,14 @@ set.seed(20190530)
 
 Finally, we split each of the data files.
 
-```{r}
+```{r eval=FALSE}
+splitFile("cache/final/en_US/en_US.blogs.txt", "cache")
+splitFile("cache/final/en_US/en_US.news.txt", "cache")
+splitFile("cache/final/en_US/en_US.twitter.txt", "cache")
+```
+```{r splitFile, echo=FALSE}
+# The code above is a shortened display version.
+# The real code here caches files to speed-up repeated execution.
 if (!file.exists("cache/en_US.blogs.training.txt")) {
     splitFile("cache/final/en_US/en_US.blogs.txt", "cache")
 }
@@ -258,7 +267,7 @@ As the table shows, we have splitted the data on sub-sets as intended.
 In the section above we have already counted a number of lines. Let us load
 training data sets and take a look on the first 3 lines of each data set.
 
-```{r loadTradiningData}
+```{r loadTrainingData}
 blogs.text <- read_lines("cache/en_US.blogs.training.txt")
 news.text <- read_lines("cache/en_US.news.training.txt")
 twitter.text <- read_lines("cache/en_US.twitter.training.txt")
@@ -294,7 +303,7 @@ sentence border. We still may use information about sentences to improve
 prediction of the first word, because the frequency of the first word in a
 sentence may be very different from an average frequency.
 
-```{r splitOnSentences, cache=TRUE}
+```{r splitOnSentences, cache=TRUE, cache.lazy=FALSE}
 blogs.text <- unlist(tokenizers::tokenize_sentences(blogs.text))
 news.text <- unlist(tokenizers::tokenize_sentences(news.text))
 twitter.text <- unlist(tokenizers::tokenize_sentences(twitter.text))
@@ -380,9 +389,14 @@ preProcessText <- function(x) {
 }
 ```
 
-Now we pre-process the data and cache results.
+Now we pre-process the data.
 
-```{r preprocessTrainingData}
+```{r eval=FALSE}
+blogs.text.preprocessed <- unlist(mclapply(blogs.text, preProcessText))
+news.text.preprocessed <- unlist(mclapply(news.text, preProcessText))
+twitter.text.preprocessed <- unlist(mclapply(twitter.text, preProcessText))
+```
+```{r preprocessTrainingData, echo=FALSE}
 if (!file.exists("cache/blogs.text.preprocessed.txt")) {
   blogs.text.preprocessed <- unlist(mclapply(blogs.text, preProcessText))
   write_lines(blogs.text.preprocessed, "cache/blogs.text.preprocessed.txt")
@@ -402,6 +416,7 @@ if (!file.exists("cache/twitter.text.preprocessed.txt")) {
   twitter.text.preprocessed <- read_lines("cache/twitter.text.preprocessed.txt")
 }
 ```
+
 
 # <a name="analyze_1_grams"></a>Analyzing words (1-grams)
 
@@ -478,7 +493,24 @@ enrich.ngram <- function(fv) {
 Now we may calculate frequency of words in each source, as well as in all
 sources together (aggregated).
 
-```{r build1grams}
+```{r eval=FALSE}
+# Define stop-words for 1-grams: standard stop words, as well as our special
+# tokens "Start-Of-Sentence" and "End-Of-Sentence".
+stopwords.tokens <- c(stopwords(), "SOS", "EOS")
+
+# Calculate a frequency of words in each sources, as well as an aggregated.
+blogs.1gram.freq <- enrich.ngram(build.ngram(blogs.text.preprocessed, 1,
+                                             stop_words = stopwords.tokens))
+news.1gram.freq <- enrich.ngram(build.ngram(news.text.preprocessed, 1,
+                                            stop_words = stopwords.tokens))
+twitter.1gram.freq <- enrich.ngram(build.ngram(twitter.text.preprocessed, 1,
+                                               stop_words = stopwords.tokens))
+all.text.preprocessed <- c(blogs.text.preprocessed, news.text.preprocessed,
+                           twitter.text.preprocessed)
+all.1gram.freq <- enrich.ngram(build.ngram(all.text.preprocessed, 1,
+                                           stop_words = stopwords.tokens))
+```
+```{r build1grams, echo=FALSE}
 # Define stop-words for 1-grams: standard stop words, as well as our special
 # tokens "Start-Of-Sentence" and "End-Of-Sentence".
 stopwords.tokens <- c(stopwords(), "SOS", "EOS")
@@ -512,6 +544,11 @@ if (file.exists("cache/all.1gram.freq.RDS")) {
                              twitter.text.preprocessed)
   all.1gram.freq <- enrich.ngram(build.ngram(all.text.preprocessed, 1,
                                              stop_words = stopwords.tokens))
+  
+  # Clean up memory.
+  rm(all.text.preprocessed)
+  gc(full = TRUE)
+  
   saveRDS(all.1gram.freq, "cache/all.1gram.freq.RDS")
 }
 ```
@@ -519,7 +556,7 @@ if (file.exists("cache/all.1gram.freq.RDS")) {
 The following chart displays 20 most-frequent words in each source, as well
 as in the aggregated corpora.
 
-```{r mostFrequent1Grams, echo=FALSE, cache=TRUE, fig.align='center', fig.width=10, fig.height=8}
+```{r mostFrequent1Grams, echo=FALSE, cache=TRUE, cache.lazy=TRUE, fig.align='center', fig.width=10, fig.height=8}
 # Display 20 most-frequent-words.
 blogs.freq.top <- blogs.1gram.freq[1:20]
 blogs.freq.top$Terms <- factor(blogs.freq.top$Terms,
@@ -601,7 +638,7 @@ The following [Venn diagram](https://en.wikipedia.org/wiki/Venn_diagram) shows
 a number of unique words (stems) used in each source, as well as a percentage
 of the aggregated corpora covered by those words.
 
-```{r venn1grams, echo=FALSE, cache=TRUE, fig.align='center'}
+```{r venn1grams, echo=FALSE, cache=TRUE, cache.lazy=TRUE, fig.align='center'}
 all.venn <- data.frame(
   "Terms" = all.1gram.freq$Terms,
   "Freq" = all.1gram.freq$Freq,
@@ -640,6 +677,10 @@ df.venn.count$Freq <- c(sum(all.venn$Freq[all.venn$B]) / sum(all.venn$Freq),
 df.venn.count$Label <- paste0(formatC(df.venn.count$Counts, big.mark = ",", format = "d"),
                               "\n",
                               sprintf("%.2f%%", df.venn.count$Freq * 100))
+
+# Clean up memory.
+rm(all.venn)
+gc(full = TRUE)
 
 ggplot(df.venn) +
   geom_circle(aes(x0 = x, y0 = y, r = 1.5, fill = labels), alpha = .3, size = 1, colour = "#666666") +
@@ -784,7 +825,21 @@ two words.
 Using previously defined functions, we may calculate frequency of bigrams in
 each source, as well as in all sources together (aggregated).
 
-```{r build2grams}
+```{r eval=FALSE}
+# Calculate a frequency of words in each sources, as well as an aggregated.
+blogs.2gram.freq <- enrich.ngram(build.ngram(blogs.text.preprocessed, 2,
+                                             stop_words = stopwords.tokens))
+news.2gram.freq <- enrich.ngram(build.ngram(news.text.preprocessed, 2,
+                                            stop_words = stopwords.tokens))
+twitter.2gram.freq <- enrich.ngram(build.ngram(twitter.text.preprocessed, 2,
+                                               stop_words = stopwords.tokens))
+
+all.text.preprocessed <- c(blogs.text.preprocessed, news.text.preprocessed,
+                           twitter.text.preprocessed)
+all.2gram.freq <- enrich.ngram(build.ngram(all.text.preprocessed, 2,
+                                           stop_words = stopwords.tokens))
+```
+```{r build2grams, echo=FALSE}
 # Calculate a frequency of words in each sources, as well as an aggregated.
 if (file.exists("cache/blogs.2gram.freq.RDS")) {
   blogs.2gram.freq <- readRDS("cache/blogs.2gram.freq.RDS")
@@ -817,6 +872,10 @@ if (file.exists("cache/all.2gram.freq.RDS")) {
                              twitter.text.preprocessed)
   all.2gram.freq <- enrich.ngram(build.ngram(all.text.preprocessed, 2,
                                              stop_words = stopwords.tokens))
+  
+  # Clean up memory.
+  rm(all.text.preprocessed)
+  gc(full = TRUE)
   
   saveRDS(all.2gram.freq, "cache/all.2gram.freq.RDS")
 }
@@ -903,7 +962,7 @@ The following [Venn diagram](https://en.wikipedia.org/wiki/Venn_diagram) shows
 a number of unique bigrams used in each source, as well as a percentage
 of the aggregated corpora covered by those bigrams.
 
-```{r venn2grams, echo=FALSE, cache=TRUE, fig.align='center'}
+```{r venn2grams, echo=FALSE, cache=TRUE, cache.lazy=FALSE, fig.align='center'}
 all.venn <- data.frame(
   "Terms" = all.2gram.freq$Terms,
   "Freq" = all.2gram.freq$Freq,
@@ -942,6 +1001,10 @@ df.venn.count$Freq <- c(sum(all.venn$Freq[all.venn$B]) / sum(all.venn$Freq),
 df.venn.count$Label <- paste0(formatC(df.venn.count$Counts, big.mark = ",", format = "d"),
                               "\n",
                               sprintf("%.2f%%", df.venn.count$Freq * 100))
+
+# Clean up memory
+rm(all.venn)
+gc(full = TRUE)
 
 ggplot(df.venn) +
   geom_circle(aes(x0 = x, y0 = y, r = 1.5, fill = labels), alpha = .3, size = 1, colour = "#666666") +
@@ -1157,7 +1220,18 @@ And now we apply the function defined above to replace all words not included
 in the white-list with the token `UNK`. As usual, we cache produced files to
 speed up repeated rendering of this document.
 
-```{r}
+```{r eval=FALSE}
+blogs.text.95 <- unlist(mclapply(blogs.text.preprocessed,
+                                 replaceWordsNotIn,
+                                 words.whitelist, "UNK"))
+news.text.95 <- unlist(mclapply(news.text.preprocessed,
+                                replaceWordsNotIn,
+                                words.whitelist, "UNK"))
+twitter.text.95 <- unlist(mclapply(twitter.text.preprocessed,
+                                   replaceWordsNotIn,
+                                   words.whitelist, "UNK"))
+```
+```{r prune.95, echo=FALSE}
 if (!exists("blogs.text.95")) {
   if (!file.exists("cache/blogs.text.95.txt")) {
     blogs.text.95 <- unlist(mclapply(blogs.text.preprocessed,
@@ -1193,7 +1267,13 @@ if (!exists("twitter.text.95")) {
 After pruning seldom words, we re-calculate bigrams. From now on, we will
 analyze only the aggregated corpus.
 
-```{r}
+```{r eval=FALSE}
+# Calculate frequency of bigrams in pruned source, or load from cache.
+all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
+all.2gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 2,
+                                              stop_words = stopwords.tokens))
+```
+```{r build2grams.95, echo=FALSE}
   # Calculate frequency of bigrams in pruned source, or load from cache.
   if (file.exists("cache/all.2gram.95.freq.RDS")) {
     all.2gram.95.freq <- readRDS("cache/all.2gram.95.freq.RDS")
@@ -1201,6 +1281,8 @@ analyze only the aggregated corpus.
     all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
     all.2gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 2,
                                                     stop_words = stopwords.tokens))
+    rm(all.text.95)
+    gc(full = TRUE)
     
     saveRDS(all.2gram.95.freq, "cache/all.2gram.95.freq.RDS")
   }
@@ -1213,79 +1295,84 @@ For example, there are
 `r formatC(nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 30,]), big.mark = ",", format = "d")`
 unique bigrams encountered more than 30 times.
 
-```{r cover2grams.95, echo=FALSE, cache=TRUE, fig.align='center', fig.width=10}
-  # Enrich 2-grams: add columns indicating whether the 1st or 2nd words are
-  # an UNK token.
-  all.2gram.95.freq$UNK_1 <- grepl("UNK \\S+", all.2gram.95.freq$Terms)
-  all.2gram.95.freq$UNK_2 <- grepl("\\S+ UNK", all.2gram.95.freq$Terms)
-  # Enrich 2-grams: add percentage
-  all.2gram.95.freq$Freq.Pct <- all.2gram.95.freq$Freq / sum(all.2gram.95.freq$Freq)
-  #
-  all.2gram.95.freq$WRD_WRD.Freq.Cum.Pct <- cumsum(
-    ifelse(all.2gram.95.freq$UNK_1 | all.2gram.95.freq$UNK_2,
-           0,
-           all.2gram.95.freq$Freq.Pct))
-  all.2gram.95.freq$UNK_WRD.Freq.Cum.Pct <- cumsum(
-    ifelse(all.2gram.95.freq$UNK_1 & !all.2gram.95.freq$UNK_2,
-           all.2gram.95.freq$Freq.Pct,
-           0))
-  all.2gram.95.freq$WRD_UNK.Freq.Cum.Pct <- cumsum(
-    ifelse(!all.2gram.95.freq$UNK_1 & all.2gram.95.freq$UNK_2,
-           all.2gram.95.freq$Freq.Pct,
-           0))
-  all.2gram.95.freq$UNK_UNK.Freq.Cum.Pct <- cumsum(
-    ifelse(all.2gram.95.freq$UNK_1 & all.2gram.95.freq$UNK_2,
-           all.2gram.95.freq$Freq.Pct,
-           0))
+```{r cover2grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE, fig.align='center', fig.width=10}
+all.2gram.95.freq.enriched <- all.2gram.95.freq
 
-  # Use log-scale for sub-sampling the X axis.
-  all.2gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.2gram.95.freq)) / 1000)))
+# Enrich 2-grams: add columns indicating whether the 1st or 2nd words are
+# an UNK token.
+all.2gram.95.freq.enriched$UNK_1 <- grepl("UNK \\S+", all.2gram.95.freq.enriched$Terms)
+all.2gram.95.freq.enriched$UNK_2 <- grepl("\\S+ UNK", all.2gram.95.freq.enriched$Terms)
+# Enrich 2-grams: add percentage
+all.2gram.95.freq.enriched$Freq.Pct <- all.2gram.95.freq.enriched$Freq / sum(all.2gram.95.freq.enriched$Freq)
+#
+all.2gram.95.freq.enriched$WRD_WRD.Freq.Cum.Pct <- cumsum(
+  ifelse(all.2gram.95.freq.enriched$UNK_1 | all.2gram.95.freq.enriched$UNK_2,
+         0,
+         all.2gram.95.freq.enriched$Freq.Pct))
+all.2gram.95.freq.enriched$UNK_WRD.Freq.Cum.Pct <- cumsum(
+  ifelse(all.2gram.95.freq.enriched$UNK_1 & !all.2gram.95.freq.enriched$UNK_2,
+         all.2gram.95.freq.enriched$Freq.Pct,
+         0))
+all.2gram.95.freq.enriched$WRD_UNK.Freq.Cum.Pct <- cumsum(
+  ifelse(!all.2gram.95.freq.enriched$UNK_1 & all.2gram.95.freq.enriched$UNK_2,
+         all.2gram.95.freq.enriched$Freq.Pct,
+         0))
+all.2gram.95.freq.enriched$UNK_UNK.Freq.Cum.Pct <- cumsum(
+  ifelse(all.2gram.95.freq.enriched$UNK_1 & all.2gram.95.freq.enriched$UNK_2,
+         all.2gram.95.freq.enriched$Freq.Pct,
+         0))
 
-  all.2gram.95.freq.pct <- rbind(
-    data.frame("Type" = rep("UNK UNK", length(all.2gram.95.freq.idx)),
-               "Count" = all.2gram.95.freq.idx,
-               "Freq.Pct" = all.2gram.95.freq$UNK_UNK.Freq.Cum.Pct[all.2gram.95.freq.idx]),
-    data.frame("Type" = rep("UNK Word", length(all.2gram.95.freq.idx)),
-               "Count" = all.2gram.95.freq.idx,
-               "Freq.Pct" = all.2gram.95.freq$UNK_WRD.Freq.Cum.Pct[all.2gram.95.freq.idx]),
-    data.frame("Type" = rep("Word UNK", length(all.2gram.95.freq.idx)),
-               "Count" = all.2gram.95.freq.idx,
-               "Freq.Pct" = all.2gram.95.freq$WRD_UNK.Freq.Cum.Pct[all.2gram.95.freq.idx]),
-    data.frame("Type" = rep("Word Word", length(all.2gram.95.freq.idx)),
-               "Count" = all.2gram.95.freq.idx,
-               "Freq.Pct" = all.2gram.95.freq$WRD_WRD.Freq.Cum.Pct[all.2gram.95.freq.idx])
-  )
-  
-  # How many are there unique bigrams which are encountered more than N times?
-  all.2gram.95.freq.30 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 30,])
-  all.2gram.95.freq.20 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 20,])
-  all.2gram.95.freq.10 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 10,])
-  all.2gram.95.freq.5 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 5,])
-  all.2gram.95.freq.1 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 1,])
-  
-  gp <- ggplot(all.2gram.95.freq.pct,
-               aes(x = Count, y = Freq.Pct, fill = Type)) +
-    scale_x_continuous(trans = "log10",
-                       breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
-                       labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
-    geom_area() + 
-    scale_fill_brewer(palette="Greens", breaks=rev(levels(all.2gram.95.freq.pct$Type))) +
-    geom_segment(aes(x = all.2gram.95.freq.30, y = 0, xend = all.2gram.95.freq.30, yend = 0.5)) +
-    geom_segment(aes(x = all.2gram.95.freq.20, y = 0, xend = all.2gram.95.freq.20, yend = 0.6)) +
-    geom_segment(aes(x = all.2gram.95.freq.10, y = 0, xend = all.2gram.95.freq.10, yend = 0.7)) +
-    geom_segment(aes(x = all.2gram.95.freq.5, y = 0, xend = all.2gram.95.freq.5, yend = 0.8)) +
-    geom_segment(aes(x = all.2gram.95.freq.1, y = 0, xend = all.2gram.95.freq.1, yend = 0.9)) +
-    annotate(geom="text", x=all.2gram.95.freq.30, y=0.52, label="30")+
-    annotate(geom="text", x=all.2gram.95.freq.20, y=0.62, label="20")+
-    annotate(geom="text", x=all.2gram.95.freq.10, y=0.72, label="10")+
-    annotate(geom="text", x=all.2gram.95.freq.5, y=0.82, label="5")+
-    annotate(geom="text", x=all.2gram.95.freq.1, y=0.92, label="1")+
-    labs(title = "Cumulative Frequency of Bigrams") +
-    labs(x = "Unique bigrams") +
-    labs(y = "Cumulative Frequency, %") +
-    theme_bw(base_size = 14) 
-  print(gp)
+# Use log-scale for sub-sampling the X axis.
+all.2gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.2gram.95.freq.enriched)) / 1000)))
 
+all.2gram.95.freq.pct <- rbind(
+  data.frame("Type" = rep("UNK UNK", length(all.2gram.95.freq.idx)),
+             "Count" = all.2gram.95.freq.idx,
+             "Freq.Pct" = all.2gram.95.freq.enriched$UNK_UNK.Freq.Cum.Pct[all.2gram.95.freq.idx]),
+  data.frame("Type" = rep("UNK Word", length(all.2gram.95.freq.idx)),
+             "Count" = all.2gram.95.freq.idx,
+             "Freq.Pct" = all.2gram.95.freq.enriched$UNK_WRD.Freq.Cum.Pct[all.2gram.95.freq.idx]),
+  data.frame("Type" = rep("Word UNK", length(all.2gram.95.freq.idx)),
+             "Count" = all.2gram.95.freq.idx,
+             "Freq.Pct" = all.2gram.95.freq.enriched$WRD_UNK.Freq.Cum.Pct[all.2gram.95.freq.idx]),
+  data.frame("Type" = rep("Word Word", length(all.2gram.95.freq.idx)),
+             "Count" = all.2gram.95.freq.idx,
+             "Freq.Pct" = all.2gram.95.freq.enriched$WRD_WRD.Freq.Cum.Pct[all.2gram.95.freq.idx])
+)
+
+# Clean up memory
+rm(all.2gram.95.freq.enriched)
+gc(full = TRUE)
+
+# How many are there unique bigrams which are encountered more than N times?
+all.2gram.95.freq.30 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 30,])
+all.2gram.95.freq.20 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 20,])
+all.2gram.95.freq.10 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 10,])
+all.2gram.95.freq.5 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 5,])
+all.2gram.95.freq.1 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 1,])
+
+gp <- ggplot(all.2gram.95.freq.pct,
+             aes(x = Count, y = Freq.Pct, fill = Type)) +
+  scale_x_continuous(trans = "log10",
+                     breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                     labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+  geom_area() + 
+  scale_fill_brewer(palette="Greens", breaks=rev(levels(all.2gram.95.freq.pct$Type))) +
+  geom_segment(aes(x = all.2gram.95.freq.30, y = 0, xend = all.2gram.95.freq.30, yend = 0.5)) +
+  geom_segment(aes(x = all.2gram.95.freq.20, y = 0, xend = all.2gram.95.freq.20, yend = 0.6)) +
+  geom_segment(aes(x = all.2gram.95.freq.10, y = 0, xend = all.2gram.95.freq.10, yend = 0.7)) +
+  geom_segment(aes(x = all.2gram.95.freq.5, y = 0, xend = all.2gram.95.freq.5, yend = 0.8)) +
+  geom_segment(aes(x = all.2gram.95.freq.1, y = 0, xend = all.2gram.95.freq.1, yend = 0.9)) +
+  annotate(geom="text", x=all.2gram.95.freq.30, y=0.52, label="30")+
+  annotate(geom="text", x=all.2gram.95.freq.20, y=0.62, label="20")+
+  annotate(geom="text", x=all.2gram.95.freq.10, y=0.72, label="10")+
+  annotate(geom="text", x=all.2gram.95.freq.5, y=0.82, label="5")+
+  annotate(geom="text", x=all.2gram.95.freq.1, y=0.92, label="1")+
+  labs(title = "Cumulative Frequency of Bigrams") +
+  labs(x = "Unique bigrams") +
+  labs(y = "Cumulative Frequency, %") +
+  theme_bw(base_size = 14) 
+print(gp)
 ```
 
 By pruning we have reduced a number of unique bigrams from
@@ -1297,3 +1384,460 @@ reduces the number of unique 2-grams and thus memory requirements of our
 application, on the other hand it removes information which may be required
 to achieve good prediction rate.
 
+# <a name="3_to_6_grams"></a>3-grams to 6-grams
+
+After analyzing bigrams, now there is a time to take a look on a longer n-grams.
+We decided to analyze 3-grams to 6-grams.
+
+```{r eval=FALSE}
+# Calculate frequency of 3- to 6-grams in pruned source.
+all.3gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 3,
+                                              stop_words = stopwords.tokens))
+all.4gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 4,
+                                              stop_words = stopwords.tokens))
+all.5gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 5,
+                                              stop_words = stopwords.tokens))
+all.6gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 6,
+                                              stop_words = stopwords.tokens))
+```
+```{r build3456grams.95, echo=FALSE}
+  # Calculate frequency of 3- to 6-grams in pruned source, or load from cache.
+  if (file.exists("cache/all.3gram.95.freq.RDS")) {
+    all.3gram.95.freq <- readRDS("cache/all.3gram.95.freq.RDS")
+  } else {
+    all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
+    all.3gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 3,
+                                                    stop_words = stopwords.tokens))
+    rm(all.text.95)
+    gc(full = TRUE)
+    
+    saveRDS(all.3gram.95.freq, "cache/all.3gram.95.freq.RDS")
+  }
+  if (file.exists("cache/all.4gram.95.freq.RDS")) {
+    all.4gram.95.freq <- readRDS("cache/all.4gram.95.freq.RDS")
+  } else {
+    all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
+    all.4gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 4,
+                                                    stop_words = stopwords.tokens))
+    rm(all.text.95)
+    gc(full = TRUE)
+    
+    saveRDS(all.4gram.95.freq, "cache/all.4gram.95.freq.RDS")
+  }
+  if (file.exists("cache/all.5gram.95.freq.RDS")) {
+    all.5gram.95.freq <- readRDS("cache/all.5gram.95.freq.RDS")
+  } else {
+    all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
+    all.5gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 5,
+                                                    stop_words = stopwords.tokens))
+    rm(all.text.95)
+    gc(full = TRUE)
+
+    saveRDS(all.5gram.95.freq, "cache/all.5gram.95.freq.RDS")
+  }
+  if (file.exists("cache/all.6gram.95.freq.RDS")) {
+    all.6gram.95.freq <- readRDS("cache/all.6gram.95.freq.RDS")
+  } else {
+    all.text.95 <- c(blogs.text.95, news.text.95, twitter.text.95)
+    all.6gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 6,
+                                                    stop_words = stopwords.tokens))
+    rm(all.text.95)
+    gc(full = TRUE)
+    
+    saveRDS(all.6gram.95.freq, "cache/all.6gram.95.freq.RDS")
+  }
+```
+
+```{r cover3grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE, fig.align='center', fig.width=10}
+all.3gram.95.freq.enriched <- all.3gram.95.freq
+
+# Enrich 3-grams: add columns indicating whether n-th word is an UNK token.
+all.3gram.95.freq.enriched$UNK_1 <- grepl("UNK \\S+ \\S+", all.3gram.95.freq.enriched$Terms)
+all.3gram.95.freq.enriched$UNK_2 <- grepl("\\S+ UNK \\S+", all.3gram.95.freq.enriched$Terms)
+all.3gram.95.freq.enriched$UNK_3 <- grepl("\\S+ \\S+ UNK", all.3gram.95.freq.enriched$Terms)
+
+# Enrich 3-grams: add a column with a count of UNK token.
+all.3gram.95.freq.enriched$UNK_N <- all.3gram.95.freq.enriched$UNK_1 +
+  all.3gram.95.freq.enriched$UNK_2 +
+  all.3gram.95.freq.enriched$UNK_3
+
+# Enrich 3-grams: add percentage
+all.3gram.95.freq.enriched$Freq.Pct <- all.3gram.95.freq.enriched$Freq / sum(all.3gram.95.freq.enriched$Freq)
+#
+all.3gram.95.freq.enriched$UNK_0.Freq.Cum.Pct <- cumsum(
+  ifelse(all.3gram.95.freq.enriched$UNK_N == 0,
+         all.3gram.95.freq.enriched$Freq.Pct,
+         0))
+all.3gram.95.freq.enriched$UNK_1.Freq.Cum.Pct <- cumsum(
+  ifelse(all.3gram.95.freq.enriched$UNK_N == 1,
+         all.3gram.95.freq.enriched$Freq.Pct,
+         0))
+all.3gram.95.freq.enriched$UNK_2.Freq.Cum.Pct <- cumsum(
+  ifelse(all.3gram.95.freq.enriched$UNK_N == 2,
+         all.3gram.95.freq.enriched$Freq.Pct,
+         0))
+all.3gram.95.freq.enriched$UNK_3.Freq.Cum.Pct <- cumsum(
+  ifelse(all.3gram.95.freq.enriched$UNK_N == 3,
+         all.3gram.95.freq.enriched$Freq.Pct,
+         0))
+
+# We want to use sample points. Over how many points we have to jump?
+all.3gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.3gram.95.freq)) / 1000)))
+
+all.3gram.95.freq.pct <- rbind(
+  data.frame("Type" = rep("3 UNK", length(all.3gram.95.freq.idx)),
+             "Count" = all.3gram.95.freq.idx,
+             "Freq.Pct" = all.3gram.95.freq.enriched$UNK_3.Freq.Cum.Pct[all.3gram.95.freq.idx]),
+  data.frame("Type" = rep("2 UNK", length(all.3gram.95.freq.idx)),
+             "Count" = all.3gram.95.freq.idx,
+             "Freq.Pct" = all.3gram.95.freq.enriched$UNK_2.Freq.Cum.Pct[all.3gram.95.freq.idx]),
+  data.frame("Type" = rep("1 UNK", length(all.3gram.95.freq.idx)),
+             "Count" = all.3gram.95.freq.idx,
+             "Freq.Pct" = all.3gram.95.freq.enriched$UNK_1.Freq.Cum.Pct[all.3gram.95.freq.idx]),
+  data.frame("Type" = rep("0 UNK", length(all.3gram.95.freq.idx)),
+             "Count" = all.3gram.95.freq.idx,
+             "Freq.Pct" = all.3gram.95.freq.enriched$UNK_0.Freq.Cum.Pct[all.3gram.95.freq.idx])
+)
+
+# How many are there unique 3-grams which are encountered more than N times?
+all.3gram.95.freq.30 <- nrow(all.3gram.95.freq[all.3gram.95.freq$Freq > 30,])
+all.3gram.95.freq.20 <- nrow(all.3gram.95.freq[all.3gram.95.freq$Freq > 20,])
+all.3gram.95.freq.10 <- nrow(all.3gram.95.freq[all.3gram.95.freq$Freq > 10,])
+all.3gram.95.freq.5 <- nrow(all.3gram.95.freq[all.3gram.95.freq$Freq > 5,])
+all.3gram.95.freq.1 <- nrow(all.3gram.95.freq[all.3gram.95.freq$Freq > 1,])
+
+# Clean up memory
+rm(all.3gram.95.freq.enriched)
+gc(full = TRUE)
+
+ggplot(all.3gram.95.freq.pct,
+       aes(x = Count, y = Freq.Pct, fill = Type)) +
+  scale_x_continuous(trans = "log10",
+                     breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                     labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+  geom_area() + 
+  scale_fill_brewer(palette="Greens", breaks=rev(levels(all.3gram.95.freq.pct$Type))) +
+  geom_segment(aes(x = all.3gram.95.freq.30, y = 0, xend = all.3gram.95.freq.30, yend = 0.5)) +
+  geom_segment(aes(x = all.3gram.95.freq.20, y = 0, xend = all.3gram.95.freq.20, yend = 0.6)) +
+  geom_segment(aes(x = all.3gram.95.freq.10, y = 0, xend = all.3gram.95.freq.10, yend = 0.7)) +
+  geom_segment(aes(x = all.3gram.95.freq.5, y = 0, xend = all.3gram.95.freq.5, yend = 0.8)) +
+  geom_segment(aes(x = all.3gram.95.freq.1, y = 0, xend = all.3gram.95.freq.1, yend = 0.9)) +
+  annotate(geom="text", x=all.3gram.95.freq.30, y=0.52, label="30")+
+  annotate(geom="text", x=all.3gram.95.freq.20, y=0.62, label="20")+
+  annotate(geom="text", x=all.3gram.95.freq.10, y=0.72, label="10")+
+  annotate(geom="text", x=all.3gram.95.freq.5, y=0.82, label="5")+
+  annotate(geom="text", x=all.3gram.95.freq.1, y=0.92, label="1")+
+  labs(title = "Cumulative Frequency of 3-grams") +
+  labs(x = "Unique 3-grams") +
+  labs(y = "Cumulative Frequency, %") +
+  theme_bw(base_size = 14) 
+```
+
+```{r cover4grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE, fig.align='center', fig.width=10}
+all.4gram.95.freq.enriched <- all.4gram.95.freq
+
+# Enrich 4-grams: add columns indicating whether n-th word is an UNK token.
+all.4gram.95.freq.enriched$UNK_1 <- grepl("UNK \\S+ \\S+ \\S+", all.4gram.95.freq.enriched$Terms)
+all.4gram.95.freq.enriched$UNK_2 <- grepl("\\S+ UNK \\S+ \\S+", all.4gram.95.freq.enriched$Terms)
+all.4gram.95.freq.enriched$UNK_3 <- grepl("\\S+ \\S+ UNK \\S+", all.4gram.95.freq.enriched$Terms)
+all.4gram.95.freq.enriched$UNK_4 <- grepl("\\S+ \\S+ \\S+ UNK", all.4gram.95.freq.enriched$Terms)
+
+# Enrich 4-grams: add a column with a count of UNK token.
+all.4gram.95.freq.enriched$UNK_N <- all.4gram.95.freq.enriched$UNK_1 +
+  all.4gram.95.freq.enriched$UNK_2 +
+  all.4gram.95.freq.enriched$UNK_3 +
+  all.4gram.95.freq.enriched$UNK_4
+
+# Enrich 4-grams: add percentage
+all.4gram.95.freq.enriched$Freq.Pct <- all.4gram.95.freq.enriched$Freq / sum(all.4gram.95.freq.enriched$Freq)
+#
+all.4gram.95.freq.enriched$UNK_0.Freq.Cum.Pct <- cumsum(
+  ifelse(all.4gram.95.freq.enriched$UNK_N == 0,
+         all.4gram.95.freq.enriched$Freq.Pct,
+         0))
+all.4gram.95.freq.enriched$UNK_1.Freq.Cum.Pct <- cumsum(
+  ifelse(all.4gram.95.freq.enriched$UNK_N == 1,
+         all.4gram.95.freq.enriched$Freq.Pct,
+         0))
+all.4gram.95.freq.enriched$UNK_2.Freq.Cum.Pct <- cumsum(
+  ifelse(all.4gram.95.freq.enriched$UNK_N == 2,
+         all.4gram.95.freq.enriched$Freq.Pct,
+         0))
+all.4gram.95.freq.enriched$UNK_3.Freq.Cum.Pct <- cumsum(
+  ifelse(all.4gram.95.freq.enriched$UNK_N == 3,
+         all.4gram.95.freq.enriched$Freq.Pct,
+         0))
+all.4gram.95.freq.enriched$UNK_4.Freq.Cum.Pct <- cumsum(
+  ifelse(all.4gram.95.freq.enriched$UNK_N == 4,
+         all.4gram.95.freq.enriched$Freq.Pct,
+         0))
+
+# We want to use sample points. Over how many points we have to jump?
+all.4gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.4gram.95.freq)) / 1000)))
+
+all.4gram.95.freq.pct <- rbind(
+  data.frame("Type" = rep("4 UNK", length(all.4gram.95.freq.idx)),
+             "Count" = all.4gram.95.freq.idx,
+             "Freq.Pct" = all.4gram.95.freq.enriched$UNK_4.Freq.Cum.Pct[all.4gram.95.freq.idx]),
+  data.frame("Type" = rep("3 UNK", length(all.4gram.95.freq.idx)),
+             "Count" = all.4gram.95.freq.idx,
+             "Freq.Pct" = all.4gram.95.freq.enriched$UNK_3.Freq.Cum.Pct[all.4gram.95.freq.idx]),
+  data.frame("Type" = rep("2 UNK", length(all.4gram.95.freq.idx)),
+             "Count" = all.4gram.95.freq.idx,
+             "Freq.Pct" = all.4gram.95.freq.enriched$UNK_2.Freq.Cum.Pct[all.4gram.95.freq.idx]),
+  data.frame("Type" = rep("1 UNK", length(all.4gram.95.freq.idx)),
+             "Count" = all.4gram.95.freq.idx,
+             "Freq.Pct" = all.4gram.95.freq.enriched$UNK_1.Freq.Cum.Pct[all.4gram.95.freq.idx]),
+  data.frame("Type" = rep("0 UNK", length(all.4gram.95.freq.idx)),
+             "Count" = all.4gram.95.freq.idx,
+             "Freq.Pct" = all.4gram.95.freq.enriched$UNK_0.Freq.Cum.Pct[all.4gram.95.freq.idx])
+)
+
+# Clean up memory
+rm(all.4gram.95.freq.enriched)
+gc(full = TRUE)
+
+# How many are there unique 4-grams which are encountered more than N times?
+all.4gram.95.freq.30 <- nrow(all.4gram.95.freq[all.4gram.95.freq$Freq > 30,])
+all.4gram.95.freq.20 <- nrow(all.4gram.95.freq[all.4gram.95.freq$Freq > 20,])
+all.4gram.95.freq.10 <- nrow(all.4gram.95.freq[all.4gram.95.freq$Freq > 10,])
+all.4gram.95.freq.5 <- nrow(all.4gram.95.freq[all.4gram.95.freq$Freq > 5,])
+all.4gram.95.freq.1 <- nrow(all.4gram.95.freq[all.4gram.95.freq$Freq > 1,])
+
+ggplot(all.4gram.95.freq.pct,
+       aes(x = Count, y = Freq.Pct, fill = Type)) +
+  scale_x_continuous(trans = "log10",
+                     breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                     labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+  geom_area() +
+  scale_fill_brewer(palette="Greens", breaks=rev(levels(all.4gram.95.freq.pct$Type))) +
+  geom_segment(aes(x = all.4gram.95.freq.30, y = 0, xend = all.4gram.95.freq.30, yend = 0.5)) +
+  geom_segment(aes(x = all.4gram.95.freq.20, y = 0, xend = all.4gram.95.freq.20, yend = 0.6)) +
+  geom_segment(aes(x = all.4gram.95.freq.10, y = 0, xend = all.4gram.95.freq.10, yend = 0.7)) +
+  geom_segment(aes(x = all.4gram.95.freq.5, y = 0, xend = all.4gram.95.freq.5, yend = 0.8)) +
+  geom_segment(aes(x = all.4gram.95.freq.1, y = 0, xend = all.4gram.95.freq.1, yend = 0.9)) +
+  annotate(geom="text", x=all.4gram.95.freq.30, y=0.52, label="30")+
+  annotate(geom="text", x=all.4gram.95.freq.20, y=0.62, label="20")+
+  annotate(geom="text", x=all.4gram.95.freq.10, y=0.72, label="10")+
+  annotate(geom="text", x=all.4gram.95.freq.5, y=0.82, label="5")+
+  annotate(geom="text", x=all.4gram.95.freq.1, y=0.92, label="1")+
+  labs(title = "Cumulative Frequency of 4-grams") +
+  labs(x = "Unique 4-grams") +
+  labs(y = "Cumulative Frequency, %") +
+  theme_bw(base_size = 14)
+```
+
+```{r cover5grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE, fig.align='center', fig.width=10}
+all.5gram.95.freq.enriched <- all.5gram.95.freq
+
+# Enrich 5-grams: add columns indicating whether n-th word is an UNK token.
+all.5gram.95.freq.enriched$UNK_1 <- grepl("UNK \\S+ \\S+ \\S+ \\S+", all.5gram.95.freq.enriched$Terms)
+all.5gram.95.freq.enriched$UNK_2 <- grepl("\\S+ UNK \\S+ \\S+ \\S+", all.5gram.95.freq.enriched$Terms)
+all.5gram.95.freq.enriched$UNK_3 <- grepl("\\S+ \\S+ UNK \\S+ \\S+", all.5gram.95.freq.enriched$Terms)
+all.5gram.95.freq.enriched$UNK_4 <- grepl("\\S+ \\S+ \\S+ UNK \\S+", all.5gram.95.freq.enriched$Terms)
+all.5gram.95.freq.enriched$UNK_5 <- grepl("\\S+ \\S+ \\S+ \\S+ UNK", all.5gram.95.freq.enriched$Terms)
+
+# Enrich 5-grams: add a column with a count of UNK token.
+all.5gram.95.freq.enriched$UNK_N <- all.5gram.95.freq.enriched$UNK_1 +
+  all.5gram.95.freq.enriched$UNK_2 +
+  all.5gram.95.freq.enriched$UNK_3 +
+  all.5gram.95.freq.enriched$UNK_4 +
+  all.5gram.95.freq.enriched$UNK_5
+
+# Enrich 5-grams: add percentage
+all.5gram.95.freq.enriched$Freq.Pct <- all.5gram.95.freq.enriched$Freq / sum(all.5gram.95.freq.enriched$Freq)
+#
+all.5gram.95.freq.enriched$UNK_0.Freq.Cum.Pct <- cumsum(
+  ifelse(all.5gram.95.freq.enriched$UNK_N == 0,
+         all.5gram.95.freq.enriched$Freq.Pct,
+         0))
+all.5gram.95.freq.enriched$UNK_1.Freq.Cum.Pct <- cumsum(
+  ifelse(all.5gram.95.freq.enriched$UNK_N == 1,
+         all.5gram.95.freq.enriched$Freq.Pct,
+         0))
+all.5gram.95.freq.enriched$UNK_2.Freq.Cum.Pct <- cumsum(
+  ifelse(all.5gram.95.freq.enriched$UNK_N == 2,
+         all.5gram.95.freq.enriched$Freq.Pct,
+         0))
+all.5gram.95.freq.enriched$UNK_3.Freq.Cum.Pct <- cumsum(
+  ifelse(all.5gram.95.freq.enriched$UNK_N == 3,
+         all.5gram.95.freq.enriched$Freq.Pct,
+         0))
+all.5gram.95.freq.enriched$UNK_4.Freq.Cum.Pct <- cumsum(
+  ifelse(all.5gram.95.freq.enriched$UNK_N == 4,
+         all.5gram.95.freq.enriched$Freq.Pct,
+         0))
+all.5gram.95.freq.enriched$UNK_5.Freq.Cum.Pct <- cumsum(
+  ifelse(all.5gram.95.freq.enriched$UNK_N == 5,
+         all.5gram.95.freq.enriched$Freq.Pct,
+         0))
+
+# We want to use sample points. Over how many points we have to jump?
+all.5gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.5gram.95.freq.enriched)) / 1000)))
+
+all.5gram.95.freq.pct <- rbind(
+  data.frame("Type" = rep("5 UNK", length(all.5gram.95.freq.idx)),
+             "Count" = all.5gram.95.freq.idx,
+             "Freq.Pct" = all.5gram.95.freq.enriched$UNK_5.Freq.Cum.Pct[all.5gram.95.freq.idx]),
+  data.frame("Type" = rep("4 UNK", length(all.5gram.95.freq.idx)),
+             "Count" = all.5gram.95.freq.idx,
+             "Freq.Pct" = all.5gram.95.freq.enriched$UNK_4.Freq.Cum.Pct[all.5gram.95.freq.idx]),
+  data.frame("Type" = rep("3 UNK", length(all.5gram.95.freq.idx)),
+             "Count" = all.5gram.95.freq.idx,
+             "Freq.Pct" = all.5gram.95.freq.enriched$UNK_3.Freq.Cum.Pct[all.5gram.95.freq.idx]),
+  data.frame("Type" = rep("2 UNK", length(all.5gram.95.freq.idx)),
+             "Count" = all.5gram.95.freq.idx,
+             "Freq.Pct" = all.5gram.95.freq.enriched$UNK_2.Freq.Cum.Pct[all.5gram.95.freq.idx]),
+  data.frame("Type" = rep("1 UNK", length(all.5gram.95.freq.idx)),
+             "Count" = all.5gram.95.freq.idx,
+             "Freq.Pct" = all.5gram.95.freq.enriched$UNK_1.Freq.Cum.Pct[all.5gram.95.freq.idx]),
+  data.frame("Type" = rep("0 UNK", length(all.5gram.95.freq.idx)),
+             "Count" = all.5gram.95.freq.idx,
+             "Freq.Pct" = all.5gram.95.freq.enriched$UNK_0.Freq.Cum.Pct[all.5gram.95.freq.idx])
+)
+
+# Clean up memory.
+rm(all.5gram.95.freq.enriched)
+gc(full = TRUE)
+
+# How many are there unique 5-grams which are encountered more than N times?
+all.5gram.95.freq.30 <- nrow(all.5gram.95.freq[all.5gram.95.freq$Freq > 30,])
+all.5gram.95.freq.20 <- nrow(all.5gram.95.freq[all.5gram.95.freq$Freq > 20,])
+all.5gram.95.freq.10 <- nrow(all.5gram.95.freq[all.5gram.95.freq$Freq > 10,])
+all.5gram.95.freq.5 <- nrow(all.5gram.95.freq[all.5gram.95.freq$Freq > 5,])
+all.5gram.95.freq.1 <- nrow(all.5gram.95.freq[all.5gram.95.freq$Freq > 1,])
+
+ggplot(all.5gram.95.freq.pct,
+       aes(x = Count, y = Freq.Pct, fill = Type)) +
+  scale_x_continuous(trans = "log10",
+                     breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                     labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+  geom_area() +
+  scale_fill_brewer(palette="Greens", breaks=rev(levels(all.5gram.95.freq.pct$Type))) +
+  geom_segment(aes(x = all.5gram.95.freq.30, y = 0, xend = all.5gram.95.freq.30, yend = 0.5)) +
+  geom_segment(aes(x = all.5gram.95.freq.20, y = 0, xend = all.5gram.95.freq.20, yend = 0.6)) +
+  geom_segment(aes(x = all.5gram.95.freq.10, y = 0, xend = all.5gram.95.freq.10, yend = 0.7)) +
+  geom_segment(aes(x = all.5gram.95.freq.5, y = 0, xend = all.5gram.95.freq.5, yend = 0.8)) +
+  geom_segment(aes(x = all.5gram.95.freq.1, y = 0, xend = all.5gram.95.freq.1, yend = 0.9)) +
+  annotate(geom="text", x=all.5gram.95.freq.30, y=0.52, label="30")+
+  annotate(geom="text", x=all.5gram.95.freq.20, y=0.62, label="20")+
+  annotate(geom="text", x=all.5gram.95.freq.10, y=0.72, label="10")+
+  annotate(geom="text", x=all.5gram.95.freq.5, y=0.82, label="5")+
+  annotate(geom="text", x=all.5gram.95.freq.1, y=0.92, label="1")+
+  labs(title = "Cumulative Frequency of 5-grams") +
+  labs(x = "Unique 5-grams") +
+  labs(y = "Cumulative Frequency, %") +
+  theme_bw(base_size = 14)
+```
+
+```{r cover6grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE, fig.align='center', fig.width=10}
+all.6gram.95.freq.enriched <- all.6gram.95.freq
+
+# Enrich 6-grams: add columns indicating whether n-th word is an UNK token.
+all.6gram.95.freq.enriched$UNK_1 <- grepl("UNK \\S+ \\S+ \\S+ \\S+ \\S+", all.6gram.95.freq.enriched$Terms)
+all.6gram.95.freq.enriched$UNK_2 <- grepl("\\S+ UNK \\S+ \\S+ \\S+ \\S+", all.6gram.95.freq.enriched$Terms)
+all.6gram.95.freq.enriched$UNK_3 <- grepl("\\S+ \\S+ UNK \\S+ \\S+ \\S+", all.6gram.95.freq.enriched$Terms)
+all.6gram.95.freq.enriched$UNK_4 <- grepl("\\S+ \\S+ \\S+ UNK \\S+ \\S+", all.6gram.95.freq.enriched$Terms)
+all.6gram.95.freq.enriched$UNK_5 <- grepl("\\S+ \\S+ \\S+ \\S+ UNK \\S+", all.6gram.95.freq.enriched$Terms)
+all.6gram.95.freq.enriched$UNK_6 <- grepl("\\S+ \\S+ \\S+ \\S+ \\S+ UNK", all.6gram.95.freq.enriched$Terms)
+
+# Enrich 6-grams: add a column with a count of UNK token.
+all.6gram.95.freq.enriched$UNK_N <- all.6gram.95.freq.enriched$UNK_1 +
+  all.6gram.95.freq.enriched$UNK_2 +
+  all.6gram.95.freq.enriched$UNK_3 +
+  all.6gram.95.freq.enriched$UNK_4 +
+  all.6gram.95.freq.enriched$UNK_5 +
+  all.6gram.95.freq.enriched$UNK_6
+
+# Enrich 5-grams: add percentage
+all.6gram.95.freq.enriched$Freq.Pct <- all.6gram.95.freq.enriched$Freq / sum(all.6gram.95.freq.enriched$Freq)
+#
+all.6gram.95.freq.enriched$UNK_0.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 0,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+all.6gram.95.freq.enriched$UNK_1.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 1,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+all.6gram.95.freq.enriched$UNK_2.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 2,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+all.6gram.95.freq.enriched$UNK_3.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 3,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+all.6gram.95.freq.enriched$UNK_4.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 4,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+all.6gram.95.freq.enriched$UNK_5.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 5,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+all.6gram.95.freq.enriched$UNK_6.Freq.Cum.Pct <- cumsum(
+  ifelse(all.6gram.95.freq.enriched$UNK_N == 6,
+         all.6gram.95.freq.enriched$Freq.Pct,
+         0))
+
+# We want to use sample points. Over how many points we have to jump?
+all.6gram.95.freq.idx <- unique(as.integer(exp((1:1000) * log(nrow(all.6gram.95.freq.enriched)) / 1000)))
+
+all.6gram.95.freq.pct <- rbind(
+  data.frame("Type" = rep("6 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_6.Freq.Cum.Pct[all.6gram.95.freq.idx]),
+  data.frame("Type" = rep("5 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_5.Freq.Cum.Pct[all.6gram.95.freq.idx]),
+  data.frame("Type" = rep("4 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_4.Freq.Cum.Pct[all.6gram.95.freq.idx]),
+  data.frame("Type" = rep("3 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_3.Freq.Cum.Pct[all.6gram.95.freq.idx]),
+  data.frame("Type" = rep("2 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_2.Freq.Cum.Pct[all.6gram.95.freq.idx]),
+  data.frame("Type" = rep("1 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_1.Freq.Cum.Pct[all.6gram.95.freq.idx]),
+  data.frame("Type" = rep("0 UNK", length(all.6gram.95.freq.idx)),
+             "Count" = all.6gram.95.freq.idx,
+             "Freq.Pct" = all.6gram.95.freq.enriched$UNK_0.Freq.Cum.Pct[all.6gram.95.freq.idx])
+)
+
+# Clean up memory.
+rm(all.6gram.95.freq.enriched)
+gc(full = TRUE)
+
+# How many are there unique 6-grams which are encountered more than N times?
+all.6gram.95.freq.30 <- nrow(all.6gram.95.freq[all.6gram.95.freq$Freq > 30,])
+all.6gram.95.freq.20 <- nrow(all.6gram.95.freq[all.6gram.95.freq$Freq > 20,])
+all.6gram.95.freq.10 <- nrow(all.6gram.95.freq[all.6gram.95.freq$Freq > 10,])
+all.6gram.95.freq.5 <- nrow(all.6gram.95.freq[all.6gram.95.freq$Freq > 5,])
+all.6gram.95.freq.1 <- nrow(all.6gram.95.freq[all.6gram.95.freq$Freq > 1,])
+
+ggplot(all.6gram.95.freq.pct,
+             aes(x = Count, y = Freq.Pct, fill = Type)) +
+  scale_x_continuous(trans = "log10",
+                     breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
+                     labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
+  geom_area() +
+  scale_fill_brewer(palette="Greens", breaks=rev(levels(all.6gram.95.freq.pct$Type))) +
+  geom_segment(aes(x = all.6gram.95.freq.30, y = 0, xend = all.6gram.95.freq.30, yend = 0.5)) +
+  geom_segment(aes(x = all.6gram.95.freq.20, y = 0, xend = all.6gram.95.freq.20, yend = 0.6)) +
+  geom_segment(aes(x = all.6gram.95.freq.10, y = 0, xend = all.6gram.95.freq.10, yend = 0.7)) +
+  geom_segment(aes(x = all.6gram.95.freq.5, y = 0, xend = all.6gram.95.freq.5, yend = 0.8)) +
+  geom_segment(aes(x = all.6gram.95.freq.1, y = 0, xend = all.6gram.95.freq.1, yend = 0.9)) +
+  annotate(geom="text", x=all.6gram.95.freq.30, y=0.52, label="30")+
+  annotate(geom="text", x=all.6gram.95.freq.20, y=0.62, label="20")+
+  annotate(geom="text", x=all.6gram.95.freq.10, y=0.72, label="10")+
+  annotate(geom="text", x=all.6gram.95.freq.5, y=0.82, label="5")+
+  annotate(geom="text", x=all.6gram.95.freq.1, y=0.92, label="1")+
+  labs(title = "Cumulative Frequency of 6-grams") +
+  labs(x = "Unique 6-grams") +
+  labs(y = "Cumulative Frequency, %") +
+  theme_bw(base_size = 14)
+```
