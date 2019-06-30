@@ -21,6 +21,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Analyzing bigrams](#analyze_2_grams)
 * [Pruning bigrams](#prune_2_grams)
 * [3-grams to 6-grams](#3_to_6_grams)
+* [Conclusions and next steps](#conclusions_next_steps)
 
 # <a name="synopsis"></a>Synopsis
 
@@ -1743,7 +1744,70 @@ obvious: for example, there are much more common 2-grams as common 6-grams.
 A consequence of this property is less obvious, but is clearly visible on
 charts: as $n$ grows, one require more and more unique n-grams to cover the same
 percentage of the text. For single words we could choose a small subsets that
-covers 95% of the corpora, but for n-grams choosing a subset does not work.
+covers 95% of the corpora, but for n-grams choosing a subset is not possible.
+
+```{r cover123456grams.count.tbl, echo=FALSE, cache=TRUE}
+all.ngram.freq.tbl <-
+    data.frame(
+        "Corpora Coverage" = c("25%", "50%", "75%", "95%"),
+        "2-grams" = c(
+            nrow(all.2gram.95.freq[all.2gram.95.freq$Freq.Cum.Pct <= 0.25]) / nrow(all.2gram.95.freq) * 100,
+            nrow(all.2gram.95.freq[all.2gram.95.freq$Freq.Cum.Pct <= 0.50]) / nrow(all.2gram.95.freq) * 100,
+            nrow(all.2gram.95.freq[all.2gram.95.freq$Freq.Cum.Pct <= 0.75]) / nrow(all.2gram.95.freq) * 100,
+            nrow(all.2gram.95.freq[all.2gram.95.freq$Freq.Cum.Pct <= 0.95]) / nrow(all.2gram.95.freq) * 100
+        ),
+        "3-grams" = c(
+            nrow(all.3gram.95.freq[all.3gram.95.freq$Freq.Cum.Pct <= 0.25]) / nrow(all.3gram.95.freq) * 100,
+            nrow(all.3gram.95.freq[all.3gram.95.freq$Freq.Cum.Pct <= 0.50]) / nrow(all.3gram.95.freq) * 100,
+            nrow(all.3gram.95.freq[all.3gram.95.freq$Freq.Cum.Pct <= 0.75]) / nrow(all.3gram.95.freq) * 100,
+            nrow(all.3gram.95.freq[all.3gram.95.freq$Freq.Cum.Pct <= 0.95]) / nrow(all.3gram.95.freq) * 100
+        ),
+        "4-grams" = c(
+            nrow(all.4gram.95.freq[all.4gram.95.freq$Freq.Cum.Pct <= 0.25]) / nrow(all.4gram.95.freq) * 100,
+            nrow(all.4gram.95.freq[all.4gram.95.freq$Freq.Cum.Pct <= 0.50]) / nrow(all.4gram.95.freq) * 100,
+            nrow(all.4gram.95.freq[all.4gram.95.freq$Freq.Cum.Pct <= 0.75]) / nrow(all.4gram.95.freq) * 100,
+            nrow(all.4gram.95.freq[all.4gram.95.freq$Freq.Cum.Pct <= 0.95]) / nrow(all.4gram.95.freq) * 100
+        ),
+        "5-grams" = c(
+            nrow(all.5gram.95.freq[all.5gram.95.freq$Freq.Cum.Pct <= 0.25]) / nrow(all.5gram.95.freq) * 100,
+            nrow(all.5gram.95.freq[all.5gram.95.freq$Freq.Cum.Pct <= 0.50]) / nrow(all.5gram.95.freq) * 100,
+            nrow(all.5gram.95.freq[all.5gram.95.freq$Freq.Cum.Pct <= 0.75]) / nrow(all.5gram.95.freq) * 100,
+            nrow(all.5gram.95.freq[all.5gram.95.freq$Freq.Cum.Pct <= 0.95]) / nrow(all.5gram.95.freq) * 100
+        ),
+        "6-grams" = c(
+            nrow(all.6gram.95.freq[all.6gram.95.freq$Freq.Cum.Pct <= 0.25]) / nrow(all.6gram.95.freq) * 100,
+            nrow(all.6gram.95.freq[all.6gram.95.freq$Freq.Cum.Pct <= 0.50]) / nrow(all.6gram.95.freq) * 100,
+            nrow(all.6gram.95.freq[all.6gram.95.freq$Freq.Cum.Pct <= 0.75]) / nrow(all.6gram.95.freq) * 100,
+            nrow(all.6gram.95.freq[all.6gram.95.freq$Freq.Cum.Pct <= 0.95]) / nrow(all.6gram.95.freq) * 100
+        )
+    )
+
+all.ngram.freq.tbl[,2] <- sprintf("%.2f", as.double(all.ngram.freq.tbl[,2]))
+all.ngram.freq.tbl[,3] <- sprintf("%.2f", as.double(all.ngram.freq.tbl[,3]))
+all.ngram.freq.tbl[,4] <- sprintf("%.2f", as.double(all.ngram.freq.tbl[,4]))
+all.ngram.freq.tbl[,5] <- sprintf("%.2f", as.double(all.ngram.freq.tbl[,5]))
+all.ngram.freq.tbl[,6] <- sprintf("%.2f", as.double(all.ngram.freq.tbl[,6]))
+
+kable(all.ngram.freq.tbl, booktabs = TRUE,
+      col.names = c("Corpora Coverage",
+                    "2-grams",
+                    "3-grams",
+                    "4-grams",
+                    "5-grams",
+                    "6-grams")) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+The table above shows a percentage of n-grams required to cover a particular
+percentage of the aggregated corpus for various n. For example, one require
+`r all.ngram.freq.tbl[2,2]`% of 2-grams to cover 50% of the corpus, but the same
+coverage requires `r all.ngram.freq.tbl[2,3]`% of 3-grams. As we could see,
+even for 2-grams we can't significantly reduce a number of unique n-grams
+without significantly reducing the coverage as well.
+  
+# <a name="Conclusions and next steps"></a>Conclusions and next steps
+
 
 
 
