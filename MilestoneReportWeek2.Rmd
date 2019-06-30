@@ -751,7 +751,7 @@ all.freq.pct <- data.frame("Source" = rep("Aggregated", length(all.freq.idx)),
 stat.freq.pct <- rbind(blogs.freq.pct, news.freq.pct, twitter.freq.pct, all.freq.pct)
 
 
-ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct, group = Source)) +
+ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct * 100, group = Source)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000),
                      labels = c("10", "100", "1,000", "10,000", "100,000")) +
@@ -1063,7 +1063,7 @@ all.freq.pct <- data.frame("Source" = rep("Aggregated", length(all.freq.idx)),
 
 stat.freq.pct <- rbind(blogs.freq.pct, news.freq.pct, twitter.freq.pct, all.freq.pct)
 
-ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct, group = Source)) +
+ggplot(data = stat.freq.pct, aes(x = Count, y = Freq.Pct * 100, group = Source)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
                      labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
@@ -1347,22 +1347,22 @@ all.2gram.95.freq.1 <- nrow(all.2gram.95.freq[all.2gram.95.freq$Freq > 1,])
 
 ```{r cover2grams.95.g, echo=FALSE, cache=TRUE, cache.lazy=FALSE, dependson='cover2grams.95', fig.align='center', fig.width=10}
 ggplot(all.2gram.95.freq.pct,
-             aes(x = Count, y = Freq.Pct, fill = Type)) +
+             aes(x = Count, y = Freq.Pct * 100, fill = Type)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
                      labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
   geom_area() + 
   scale_fill_brewer(palette="Greens", breaks=rev(levels(all.2gram.95.freq.pct$Type))) +
-  geom_segment(aes(x = all.2gram.95.freq.30, y = 0, xend = all.2gram.95.freq.30, yend = 0.5)) +
-  geom_segment(aes(x = all.2gram.95.freq.20, y = 0, xend = all.2gram.95.freq.20, yend = 0.6)) +
-  geom_segment(aes(x = all.2gram.95.freq.10, y = 0, xend = all.2gram.95.freq.10, yend = 0.7)) +
-  geom_segment(aes(x = all.2gram.95.freq.5, y = 0, xend = all.2gram.95.freq.5, yend = 0.8)) +
-  geom_segment(aes(x = all.2gram.95.freq.1, y = 0, xend = all.2gram.95.freq.1, yend = 0.9)) +
-  annotate(geom="text", x=all.2gram.95.freq.30, y=0.52, label="30")+
-  annotate(geom="text", x=all.2gram.95.freq.20, y=0.62, label="20")+
-  annotate(geom="text", x=all.2gram.95.freq.10, y=0.72, label="10")+
-  annotate(geom="text", x=all.2gram.95.freq.5, y=0.82, label="5")+
-  annotate(geom="text", x=all.2gram.95.freq.1, y=0.92, label="1")+
+  geom_segment(aes(x = all.2gram.95.freq.30, y = 0, xend = all.2gram.95.freq.30, yend = 50)) +
+  geom_segment(aes(x = all.2gram.95.freq.20, y = 0, xend = all.2gram.95.freq.20, yend = 60)) +
+  geom_segment(aes(x = all.2gram.95.freq.10, y = 0, xend = all.2gram.95.freq.10, yend = 70)) +
+  geom_segment(aes(x = all.2gram.95.freq.5, y = 0, xend = all.2gram.95.freq.5, yend = 80)) +
+  geom_segment(aes(x = all.2gram.95.freq.1, y = 0, xend = all.2gram.95.freq.1, yend = 90)) +
+  annotate(geom="text", x=all.2gram.95.freq.30, y=52, label="30")+
+  annotate(geom="text", x=all.2gram.95.freq.20, y=62, label="20")+
+  annotate(geom="text", x=all.2gram.95.freq.10, y=72, label="10")+
+  annotate(geom="text", x=all.2gram.95.freq.5, y=82, label="5")+
+  annotate(geom="text", x=all.2gram.95.freq.1, y=92, label="1")+
   labs(title = "Cumulative Frequency of Bigrams") +
   labs(x = "Unique bigrams") +
   labs(y = "Cumulative Frequency, %") +
@@ -1442,6 +1442,11 @@ all.6gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 6,
   }
 ```
 
+Chart show coverage of corpora by pruned 2- to 6-grams, where different color
+indicates n-grams with a different number of pruned words (`UNK` tokens).
+The same as for 2-grams, charts also show for several number points where
+n-grams were encountered a particular number of times.
+
 ```{r cover3grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE}
 # Use log-scale for sub-sampling the X axis.
 all.3gram.95.freq.idx <- unique(as.integer(exp((1:250) * log(nrow(all.3gram.95.freq)) / 250)))
@@ -1489,22 +1494,22 @@ dummy <- gc(full = TRUE, verbose = FALSE)
 ```
 ```{r cover3grams.95.g, echo=FALSE, cache=TRUE, cache.lazy=FALSE, dependson='cover3grams.95', fig.align='center', fig.width=10}
 ggplot(all.3gram.95.freq.pct,
-       aes(x = Count, y = Freq.Pct, fill = Type)) +
+       aes(x = Count, y = Freq.Pct * 100, fill = Type)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
                      labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
   geom_area() + 
   scale_fill_brewer(palette="Greens", breaks=rev(levels(all.3gram.95.freq.pct$Type))) +
-  geom_segment(aes(x = all.3gram.95.freq.30, y = 0, xend = all.3gram.95.freq.30, yend = 0.5)) +
-  geom_segment(aes(x = all.3gram.95.freq.20, y = 0, xend = all.3gram.95.freq.20, yend = 0.6)) +
-  geom_segment(aes(x = all.3gram.95.freq.10, y = 0, xend = all.3gram.95.freq.10, yend = 0.7)) +
-  geom_segment(aes(x = all.3gram.95.freq.5, y = 0, xend = all.3gram.95.freq.5, yend = 0.8)) +
-  geom_segment(aes(x = all.3gram.95.freq.1, y = 0, xend = all.3gram.95.freq.1, yend = 0.9)) +
-  annotate(geom="text", x=all.3gram.95.freq.30, y=0.52, label="30")+
-  annotate(geom="text", x=all.3gram.95.freq.20, y=0.62, label="20")+
-  annotate(geom="text", x=all.3gram.95.freq.10, y=0.72, label="10")+
-  annotate(geom="text", x=all.3gram.95.freq.5, y=0.82, label="5")+
-  annotate(geom="text", x=all.3gram.95.freq.1, y=0.92, label="1")+
+  geom_segment(aes(x = all.3gram.95.freq.30, y = 0, xend = all.3gram.95.freq.30, yend = 50)) +
+  geom_segment(aes(x = all.3gram.95.freq.20, y = 0, xend = all.3gram.95.freq.20, yend = 60)) +
+  geom_segment(aes(x = all.3gram.95.freq.10, y = 0, xend = all.3gram.95.freq.10, yend = 70)) +
+  geom_segment(aes(x = all.3gram.95.freq.5, y = 0, xend = all.3gram.95.freq.5, yend = 80)) +
+  geom_segment(aes(x = all.3gram.95.freq.1, y = 0, xend = all.3gram.95.freq.1, yend = 90)) +
+  annotate(geom="text", x=all.3gram.95.freq.30, y=52, label="30")+
+  annotate(geom="text", x=all.3gram.95.freq.20, y=62, label="20")+
+  annotate(geom="text", x=all.3gram.95.freq.10, y=72, label="10")+
+  annotate(geom="text", x=all.3gram.95.freq.5, y=82, label="5")+
+  annotate(geom="text", x=all.3gram.95.freq.1, y=92, label="1")+
   labs(title = "Cumulative Frequency of 3-grams") +
   labs(x = "Unique 3-grams") +
   labs(y = "Cumulative Frequency, %") +
@@ -1559,22 +1564,22 @@ all.4gram.95.freq.1 <- nrow(all.4gram.95.freq[all.4gram.95.freq$Freq > 1,])
 
 ```{r cover4grams.95.g, echo=FALSE, cache=TRUE, cache.lazy=FALSE, dependson='cover4grams.95', fig.align='center', fig.width=10}
 ggplot(all.4gram.95.freq.pct,
-       aes(x = Count, y = Freq.Pct, fill = Type)) +
+       aes(x = Count, y = Freq.Pct * 100, fill = Type)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
                      labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
   geom_area() +
   scale_fill_brewer(palette="Greens", breaks=rev(levels(all.4gram.95.freq.pct$Type))) +
-  geom_segment(aes(x = all.4gram.95.freq.30, y = 0, xend = all.4gram.95.freq.30, yend = 0.5)) +
-  geom_segment(aes(x = all.4gram.95.freq.20, y = 0, xend = all.4gram.95.freq.20, yend = 0.6)) +
-  geom_segment(aes(x = all.4gram.95.freq.10, y = 0, xend = all.4gram.95.freq.10, yend = 0.7)) +
-  geom_segment(aes(x = all.4gram.95.freq.5, y = 0, xend = all.4gram.95.freq.5, yend = 0.8)) +
-  geom_segment(aes(x = all.4gram.95.freq.1, y = 0, xend = all.4gram.95.freq.1, yend = 0.9)) +
-  annotate(geom="text", x=all.4gram.95.freq.30, y=0.52, label="30")+
-  annotate(geom="text", x=all.4gram.95.freq.20, y=0.62, label="20")+
-  annotate(geom="text", x=all.4gram.95.freq.10, y=0.72, label="10")+
-  annotate(geom="text", x=all.4gram.95.freq.5, y=0.82, label="5")+
-  annotate(geom="text", x=all.4gram.95.freq.1, y=0.92, label="1")+
+  geom_segment(aes(x = all.4gram.95.freq.30, y = 0, xend = all.4gram.95.freq.30, yend = 50)) +
+  geom_segment(aes(x = all.4gram.95.freq.20, y = 0, xend = all.4gram.95.freq.20, yend = 60)) +
+  geom_segment(aes(x = all.4gram.95.freq.10, y = 0, xend = all.4gram.95.freq.10, yend = 70)) +
+  geom_segment(aes(x = all.4gram.95.freq.5, y = 0, xend = all.4gram.95.freq.5, yend = 80)) +
+  geom_segment(aes(x = all.4gram.95.freq.1, y = 0, xend = all.4gram.95.freq.1, yend = 90)) +
+  annotate(geom="text", x=all.4gram.95.freq.30, y=52, label="30")+
+  annotate(geom="text", x=all.4gram.95.freq.20, y=62, label="20")+
+  annotate(geom="text", x=all.4gram.95.freq.10, y=72, label="10")+
+  annotate(geom="text", x=all.4gram.95.freq.5, y=82, label="5")+
+  annotate(geom="text", x=all.4gram.95.freq.1, y=92, label="1")+
   labs(title = "Cumulative Frequency of 4-grams") +
   labs(x = "Unique 4-grams") +
   labs(y = "Cumulative Frequency, %") +
@@ -1633,22 +1638,22 @@ all.5gram.95.freq.1 <- nrow(all.5gram.95.freq[all.5gram.95.freq$Freq > 1,])
 
 ```{r cover5grams.95.g, echo=FALSE, cache=TRUE, cache.lazy=FALSE, dependson='cover5grams.95', fig.align='center', fig.width=10}
 ggplot(all.5gram.95.freq.pct,
-       aes(x = Count, y = Freq.Pct, fill = Type)) +
+       aes(x = Count, y = Freq.Pct * 100, fill = Type)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
                      labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
   geom_area() +
   scale_fill_brewer(palette="Greens", breaks=rev(levels(all.5gram.95.freq.pct$Type))) +
-  geom_segment(aes(x = all.5gram.95.freq.30, y = 0, xend = all.5gram.95.freq.30, yend = 0.5)) +
-  geom_segment(aes(x = all.5gram.95.freq.20, y = 0, xend = all.5gram.95.freq.20, yend = 0.6)) +
-  geom_segment(aes(x = all.5gram.95.freq.10, y = 0, xend = all.5gram.95.freq.10, yend = 0.7)) +
-  geom_segment(aes(x = all.5gram.95.freq.5, y = 0, xend = all.5gram.95.freq.5, yend = 0.8)) +
-  geom_segment(aes(x = all.5gram.95.freq.1, y = 0, xend = all.5gram.95.freq.1, yend = 0.9)) +
-  annotate(geom="text", x=all.5gram.95.freq.30, y=0.52, label="30")+
-  annotate(geom="text", x=all.5gram.95.freq.20, y=0.62, label="20")+
-  annotate(geom="text", x=all.5gram.95.freq.10, y=0.72, label="10")+
-  annotate(geom="text", x=all.5gram.95.freq.5, y=0.82, label="5")+
-  annotate(geom="text", x=all.5gram.95.freq.1, y=0.92, label="1")+
+  geom_segment(aes(x = all.5gram.95.freq.30, y = 0, xend = all.5gram.95.freq.30, yend = 50)) +
+  geom_segment(aes(x = all.5gram.95.freq.20, y = 0, xend = all.5gram.95.freq.20, yend = 60)) +
+  geom_segment(aes(x = all.5gram.95.freq.10, y = 0, xend = all.5gram.95.freq.10, yend = 70)) +
+  geom_segment(aes(x = all.5gram.95.freq.5, y = 0, xend = all.5gram.95.freq.5, yend = 80)) +
+  geom_segment(aes(x = all.5gram.95.freq.1, y = 0, xend = all.5gram.95.freq.1, yend = 90)) +
+  annotate(geom="text", x=all.5gram.95.freq.30, y=52, label="30")+
+  annotate(geom="text", x=all.5gram.95.freq.20, y=62, label="20")+
+  annotate(geom="text", x=all.5gram.95.freq.10, y=72, label="10")+
+  annotate(geom="text", x=all.5gram.95.freq.5, y=82, label="5")+
+  annotate(geom="text", x=all.5gram.95.freq.1, y=92, label="1")+
   labs(title = "Cumulative Frequency of 5-grams") +
   labs(x = "Unique 5-grams") +
   labs(y = "Cumulative Frequency, %") +
@@ -1711,25 +1716,34 @@ all.6gram.95.freq.1 <- nrow(all.6gram.95.freq[all.6gram.95.freq$Freq > 1,])
 
 ```{r cover6grams.95.g, echo=FALSE, cache=TRUE, cache.lazy=FALSE, dependson='cover6grams.95', fig.align='center', fig.width=10}
 ggplot(all.6gram.95.freq.pct,
-             aes(x = Count, y = Freq.Pct, fill = Type)) +
+             aes(x = Count, y = Freq.Pct * 100, fill = Type)) +
   scale_x_continuous(trans = "log10",
                      breaks = c(10, 100, 1000, 10000, 100000, 1000000, 10000000),
                      labels = c("10", "100", "1,000", "10,000", "100,000", "1,000,000", "10,000,000")) +
   geom_area() +
   scale_fill_brewer(palette="Greens", breaks=rev(levels(all.6gram.95.freq.pct$Type))) +
-  geom_segment(aes(x = all.6gram.95.freq.30, y = 0, xend = all.6gram.95.freq.30, yend = 0.5)) +
-  geom_segment(aes(x = all.6gram.95.freq.20, y = 0, xend = all.6gram.95.freq.20, yend = 0.6)) +
-  geom_segment(aes(x = all.6gram.95.freq.10, y = 0, xend = all.6gram.95.freq.10, yend = 0.7)) +
-  geom_segment(aes(x = all.6gram.95.freq.5, y = 0, xend = all.6gram.95.freq.5, yend = 0.8)) +
-  geom_segment(aes(x = all.6gram.95.freq.1, y = 0, xend = all.6gram.95.freq.1, yend = 0.9)) +
-  annotate(geom="text", x=all.6gram.95.freq.30, y=0.52, label="30")+
-  annotate(geom="text", x=all.6gram.95.freq.20, y=0.62, label="20")+
-  annotate(geom="text", x=all.6gram.95.freq.10, y=0.72, label="10")+
-  annotate(geom="text", x=all.6gram.95.freq.5, y=0.82, label="5")+
-  annotate(geom="text", x=all.6gram.95.freq.1, y=0.92, label="1")+
+  geom_segment(aes(x = all.6gram.95.freq.30, y = 0, xend = all.6gram.95.freq.30, yend = 50)) +
+  geom_segment(aes(x = all.6gram.95.freq.20, y = 0, xend = all.6gram.95.freq.20, yend = 60)) +
+  geom_segment(aes(x = all.6gram.95.freq.10, y = 0, xend = all.6gram.95.freq.10, yend = 70)) +
+  geom_segment(aes(x = all.6gram.95.freq.5, y = 0, xend = all.6gram.95.freq.5, yend = 80)) +
+  geom_segment(aes(x = all.6gram.95.freq.1, y = 0, xend = all.6gram.95.freq.1, yend = 90)) +
+  annotate(geom="text", x=all.6gram.95.freq.30, y=52, label="30")+
+  annotate(geom="text", x=all.6gram.95.freq.20, y=62, label="20")+
+  annotate(geom="text", x=all.6gram.95.freq.10, y=72, label="10")+
+  annotate(geom="text", x=all.6gram.95.freq.5, y=82, label="5")+
+  annotate(geom="text", x=all.6gram.95.freq.1, y=92, label="1")+
   labs(title = "Cumulative Frequency of 6-grams") +
   labs(x = "Unique 6-grams") +
   labs(y = "Cumulative Frequency, %") +
   theme_bw(base_size = 14)
 ```
+
+As $n$ grows, the number of repeated n-grams decreases. This property is quite
+obvious: for example, there are much more common 2-grams as common 6-grams.
+A consequence of this property is less obvious, but is clearly visible on
+charts: as $n$ grows, one require more and more unique n-grams to cover the same
+percentage of the text. For single words we could choose a small subsets that
+covers 95% of the corpora, but for n-grams choosing a subset does not work.
+
+
 
