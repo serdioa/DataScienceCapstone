@@ -1,7 +1,7 @@
 ---
 title: "Data Science Capstone Project: Milestone Report"
 author: "Alexey Serdyuk"
-date: "16/06/2019"
+date: "01/07/2019"
 output: html_document
 ---
 
@@ -45,10 +45,6 @@ corpora, as R provides several alternatives. Initially we attempted to use
 the library `tm`, but quickly found that the library is very memory-hungry,
 and an attempt to build bi- or trigrams for a large corpus are not practical.
 After some googling we decided to use the library `quanteda` instead.
-
-Too keep our namespace relatively clean, we load only those libraries from
-which we use many functions, or if we use the same function many times.
-Otherwise we will use full syntax, for example `stopwords::stopwords()`.
 
 We start by loading required libraries.
 
@@ -1220,8 +1216,7 @@ words.whitelist <- c(words.95, stopwords(), "SOS", "EOS")
 ```
 
 And now we apply the function defined above to replace all words not included
-in the white-list with the token `UNK`. As usual, we cache produced files to
-speed up repeated rendering of this document.
+in the white-list with the token `UNK`.
 
 ```{r eval=FALSE}
 blogs.text.95 <- unlist(mclapply(blogs.text.preprocessed,
@@ -1443,10 +1438,10 @@ all.6gram.95.freq <- enrich.ngram(build.ngram(all.text.95, 6,
   }
 ```
 
-Chart show coverage of corpora by pruned 2- to 6-grams, where different color
-indicates n-grams with a different number of pruned words (`UNK` tokens).
-The same as for 2-grams, charts also show for several number points where
-n-grams were encountered a particular number of times.
+Charts below show coverage of corpora by pruned 2- to 6-grams, where
+different color indicates n-grams with a different number of pruned words (`UNK`
+tokens). The same as for 2-grams, charts also show for several number points
+where n-grams were encountered a particular number of times.
 
 ```{r cover3grams.95, echo=FALSE, cache=TRUE, cache.lazy=FALSE}
 # Use log-scale for sub-sampling the X axis.
@@ -1740,11 +1735,12 @@ ggplot(all.6gram.95.freq.pct,
 ```
 
 As $n$ grows, the number of repeated n-grams decreases. This property is quite
-obvious: for example, there are much more common 2-grams as common 6-grams.
-A consequence of this property is less obvious, but is clearly visible on
+obvious: for example, there are much more common 2-grams (like "last year" or
+"good luck") as common 6-grams. A consequence of this property is less obvious, but is clearly visible on
 charts: as $n$ grows, one require more and more unique n-grams to cover the same
 percentage of the text. For single words we could choose a small subsets that
-covers 95% of the corpora, but for n-grams choosing a subset is not possible.
+covers 95% of the corpora, but for n-grams achieving a high corpora coverage
+with a small subset is impossible.
 
 ```{r cover123456grams.count.tbl, echo=FALSE, cache=TRUE}
 all.ngram.freq.tbl <-
@@ -1806,8 +1802,55 @@ coverage requires `r all.ngram.freq.tbl[2,3]`% of 3-grams. As we could see,
 even for 2-grams we can't significantly reduce a number of unique n-grams
 without significantly reducing the coverage as well.
   
-# <a name="Conclusions and next steps"></a>Conclusions and next steps
+# <a name="conclusions_next_steps"></a>Conclusions and next steps
 
+Conclusions from the data analysis:
 
+* If we keep only most often used words required for 95% coverage of the
+corpora, we may significatly reduce the number of distinct words, but the number
+of 2- to 6-grams is not significantly affected.
+* To get a decent coverage of the corpora by 2- to 6-grams, we require millions
+of entries. To reduce memory usage, probably we have to use some encoding
+shema. Here we may again return to the idea of keeping only most often used
+words to reduce the size of the encoded data.
+* For small $n$, many n-grams are encountered in the corpora multiple times,
+but for large $n$ most n-grams are encountered just once. This is intuitively
+obvious: we expect common bigrams "last year" or "good luck" to be repeated
+many time, but a probability that a particular 6-gram repeats is pretty low.
+When developing a prediction model, we have to test if it makes sense at all
+to include in the model n-grams with large $n$, since this could be an
+overfitting to the training set without any benefits for the prediction quality.
 
+Open questions:
 
+* Should we include stop-words in our prediction set? On one hand, stop-words
+are too common and may be considered a syntactical "garbage", on the other
+hand they are an important part of a natural language.
+* How should we use the stemming? On one hand, stemming may reduce the number
+of n-grams and improve prediction quality. On the other hand, we want to predict
+full words, not just stems. At the moment we are inclined to stem words used
+for the prediction, but not the predicted word. This approach may require
+a custom implementation of the tokenization algorithm.
+* Should we replace seldom words with the special token `UNK` or should we keep
+such words?
+* Does it make sense to use n-grams for large $n$, or could we overfit our
+model with them?
+* Should we replace common abbreviations with full text before training our
+algorithm, or should we keep the abbreviations (for example, AFAIK = "as far as
+I know")?
+* Should we remove profanity from the corpora, or should we keep it as a part
+of the natural language? At the moment we are inclined to keep profanity in the
+dictionary, but never predict it. Keeping profanity in the dictionary may
+improve quality of prediction for non-profane words. For example, after the
+bigram "for fuck's" we may predict the non-profane word "sake". If we would have
+excluded profanity from our dictionary, we may miss the right prediction in this
+case.
+
+To answer most questions above, we have to create several models and run them
+against a test data set.
+
+Next steps:
+
+* Implement the simplest possible prediction algorithm.
+* Test the algorithm on the test data set, analyze quality of prediction
+and optimize the algorithm.
