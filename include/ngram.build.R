@@ -10,7 +10,9 @@
     ngram.build <- TRUE
 
     library(data.table)
+    library(fastmatch)
     library(parallel)
+    library(pbmcapply)
     library(quanteda)
     library(readr)
     
@@ -45,6 +47,103 @@
         message("Transforming the Document Feature Matrix to a Feature Vector")
         dfm2fv(text.dfm)
     }
+    
+    ngram.build.n.1 <- function(text, n) {
+        if (n < 2) {
+            stop("invalid n for building n-grams:", n)
+        }
+        
+        # Split text on 1-grams.
+        message("Splitting text on tokens")
+        text.tokens <- tokens(text)
+        
+        # Build n-grams.
+        message("Building ", n, "-grams")
+        text.tokens <- unlist(tokens_ngrams(text.tokens, n = n, concatenator = " "),
+                              use.names = FALSE)
+        
+        # Normalize n-grams.
+        message("Normalizing ", n, "-grams")
+        text.tokens <- mclapply(text.tokens, function(x) {
+            # Split on words again.
+            x.words <- unlist(tokens(x))
+
+            # Transform the first n-1 words to stems and to the lower case.
+            x.words[1:n-1] <- ifelse(x.words[1:n-1] == "STOS",
+                                     x.words[1:n-1],
+                                     SnowballC::wordStem(tolower(x.words[1:n-1]), language = "en"))
+
+            # Concatenate words back to a single token.            
+            tmp <- paste0(x.words, collapse = " ")
+        })
+        
+        # Calculate the Document Feature Matrix
+        message("Calculating the Document Feature Matrix")
+        text.dfm <- dfm(as.tokens(text.tokens), tolower = FALSE)
+        
+        # Transform to a Feature Vector
+        message("Transforming the Document Feature Matrix to a Feature Vector")
+        dfm2fv(text.dfm)
+    }
+    
+    ngram.build.n <- function(text, n) {
+        if (n < 2) {
+            stop("invalid n for building n-grams:", n)
+        }
+        
+        # Define help functions
+        
+        # Load top stems to keep.
+        stems.top <- stems.top.cache()$Terms
+        
+        # Keep the word, if it is included in the table with top stems.
+        # Otherwise, replaces the word with the specified token.
+        top.stem.keep <- function(stem) {
+            ifelse(is.na(fmatch(stem, stems.top)), "UNK", stem)
+        }
+        
+        # Stem the specified token, transform it to the lower case, and
+        # replace with the UNK token if it is not in the list of top stems.
+        stem.word <- function(x) {
+            ifelse(x == "STOS",
+                   x,
+                   top.stem.keep(SnowballC::wordStem(tolower(x), language = "en")))
+        }
+
+        # Split text on 1-grams.
+        message("Splitting text on tokens")
+        text.tokens <- tokens(text)
+
+        message("Stem tokens and transform them to the lower case")
+        text.stems <- mclapply(text.tokens, stem.word)
+
+        # Normalize n-grams.
+        message("Normalizing ", n, "-grams")
+        text.tokens <- mclapply(1:length(text.tokens), function(x) {
+            item.tokens = text.tokens[[x]]
+            item.stems = text.stems[[x]]
+            
+            if (length(item.tokens) < n) {
+                c()
+            } else {
+                sapply(1:(length(item.tokens) - n + 1), function(i) {
+                    paste0(c(item.stems[i:(i + n - 2)], item.tokens[i + n - 1]),
+                           collapse = " ")
+                })
+            }
+        })
+        
+        # Clean up the memory.
+        rm(text.stems)
+        
+        # Calculate the Document Feature Matrix
+        message("Calculating the Document Feature Matrix")
+        text.dfm <- dfm(as.tokens(text.tokens), tolower = FALSE)
+        
+        # Transform to a Feature Vector
+        message("Transforming the Document Feature Matrix to a Feature Vector")
+        dfm2fv(text.dfm)
+    }    
     
     # Transform a Document Feature Matrix to a Frequency Vector.
     dfm2fv <- function(text.dfm) {
@@ -135,5 +234,52 @@
         }
         
         stems.freq
-    }    
+    }
+    
+    stems.top.cache <- function() {
+        # Load all stems.
+        stems.freq <- stems.freq.cache()
+        
+        # We will use 2 bytes to encode each stem, but we require 2 additional
+        # special tokens: STOS for Start-Of-Sentence, and UNK for a Unknown
+        # Word, that is a word which is not included in our encoding table.
+        # The token STOS is already included in stems, so we must make place
+        # only for the token UNK, that is we may encode (256 * 256 - 2) top
+        # stems.
+        data.table(Terms = stems.freq$Terms[1:(256 * 256 - 1)])
+    }
+    
+    all.ngram.freq.cache <- function(n) {
+        all.ngram.freq.file <- paste0("cache/all.", n, "gram.freq.RDS")
+        if (!file.exists(all.ngram.freq.file)) {
+            # Load aggregated corpus in the global environment.
+            load.preprocessed()
+            
+            # Calculate the Frequency Vector
+            message("Building ", n, "-grams")
+            all.ngram.freq <- ngram.build.n(all.text.preprocessed, n)
+            message("Done building ", n, "-grams")
+            
+            # Cache the Frequency Vector.
+            message("Saving ", n, "-grams")
+            saveRDS(all.ngram.freq, all.ngram.freq.file)
+            message("Done saving ", n, "-grams")
+        } else {
+            # Load the cached Frequency Vector.
+            message("Loading ", n, "-grams")
+            all.ngram.freq <- readRDS(all.ngram.freq.file)
+            message("Done loading ", n, "-grams")
+        }
+        
+        all.ngram.freq
+    }
+
+    options(mc.cores = 2)
+    
+    # all.ngram.freq.cache(2)
+    # all.ngram.freq.cache(3)
+    # all.ngram.freq.cache(4)
+    # all.ngram.freq.cache(5)
+    # all.ngram.freq.cache(6)
+    
 # }
