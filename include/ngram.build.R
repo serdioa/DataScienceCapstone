@@ -359,9 +359,9 @@
             all.ngram.collapsed <- ngram.collapse.n(all.ngram.freq)
 
             # Cache the frequency table.
-            message("Saving collapsed", n, "-grams")
+            message("Saving collapsed ", n, "-grams")
             saveRDS(all.ngram.collapsed, all.ngram.collapsed.file)
-            message("Done saving ", n, "-grams")
+            message("Done saving collapsed ", n, "-grams")
         } else {
             # Load the cached Collapsed Frequency Vector.
             message("Loading collapsed ", n, "-grams")
