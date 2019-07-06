@@ -109,6 +109,27 @@
                    x,
                    top.stem.keep(SnowballC::wordStem(tolower(x), language = "en")))
         }
+        
+        # Construct n-grams from the specified stem and word tokens.
+        # The first (n-1) elements for each n-gram are taken from stems,
+        # the last from words.
+        ngram.combine.chunk <- function(stems, words) {
+            stems.length <- length(stems)
+
+            lapply(1:stems.length, function(x) {
+                item.words <- words[[x]]
+                item.stems <- stems[[x]]
+
+                if (length(item.words) < n) {
+                    c()
+                } else {
+                    sapply(1:(length(item.words) - n + 1), function(i) {
+                        paste0(c(item.stems[i:(i + n - 2)], item.words[i + n - 1]),
+                               collapse = " ")
+                    })
+                }
+            })
+        }
 
         # Split text on 1-grams.
         message("Splitting text on tokens")
@@ -119,22 +140,42 @@
 
         # Normalize n-grams.
         message("Normalizing ", n, "-grams")
-        text.tokens <- mclapply(1:length(text.tokens), function(x) {
-            item.tokens = text.tokens[[x]]
-            item.stems = text.stems[[x]]
+        startTs <- Sys.time()
+        message("Started at ", startTs)
+        text.tokens.processed <- c()
+        step = 1000
+        indices <- seq(from = 1, to = length(text.tokens), by = step)
+        for (startIndex in indices) {
+            endIndex <- min(startIndex + step - 1, length(text.tokens))
+            message("Processing ", startIndex, " to ", endIndex, " of ",
+                    length(text.tokens))
             
-            if (length(item.tokens) < n) {
-                c()
-            } else {
-                sapply(1:(length(item.tokens) - n + 1), function(i) {
-                    paste0(c(item.stems[i:(i + n - 2)], item.tokens[i + n - 1]),
-                           collapse = " ")
-                })
-            }
-        })
+            text.tokens.batch <- text.tokens[startIndex:endIndex]
+            text.stems.batch <- text.stems[startIndex:endIndex]
+
+            text.tokens.batch.processed <- ngram.combine.chunk(text.stems.batch,
+                                                               text.tokens.batch)
+            text.tokens.processed <- c(text.tokens.processed, text.tokens.batch.processed)
+
+            processedPct <- endIndex / length(text.tokens)
+            currTs <- Sys.time()
+            diffTs <- currTs - startTs
+            expectedTs <- currTs + diffTs * (1 - processedPct) / processedPct
+            
+            message("Processed ", (100 * processedPct), 
+                    "%, expected to finish at ", expectedTs)
+        }
+        currTs <- Sys.time()
+        message("Finished normalizing ", n, "-grams at ", currTs)
+        message("Duration: ", (currTs - startTs))
+        
+        export.text.tokens.processed <- text.tokens.processed
+        
+        text.tokens <- text.tokens.processed
+        message("Final total processed size: ", length(text.tokens))
         
         # Clean up the memory.
-        rm(text.stems)
+        rm(text.stems, text.tokens.processed)
         
         # Calculate the Document Feature Matrix
         message("Calculating the Document Feature Matrix")
@@ -272,6 +313,21 @@
         }
         
         all.ngram.freq
+    }
+    
+    # Enrich the n-gram frequency table.
+    # Split n-gram on prefix (first n-1 elements) and suffix (last element)
+    # and store them in separate columns "Prefix" and "Suffix".
+    ngram.enrich.n <- function(ngram.freq) {
+        message("Splitting n-grams on prefix and postfix")
+        splitted <- strsplit(ngram.freq$Terms, "\\s+(?=[^\\s]+$)", perl = TRUE)
+        
+        message("Transposing splitted n-grams for merge")
+        splitted <- as.data.frame(transpose(splitted),
+                                  col.names = c("Prefix", "Suffix"))
+        
+        message("Merging splitted n-grams to the source data")
+        cbind(ngram.freq, splitted)
     }
 
     options(mc.cores = 2)
