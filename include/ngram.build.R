@@ -15,6 +15,7 @@
     library(pbmcapply)
     library(quanteda)
     library(readr)
+    library(dplyr)
     
     # Build a Feature Vector for 1-grams, that is words.
     # This is a separate function as some steps could be skipped.
@@ -323,11 +324,52 @@
         splitted <- strsplit(ngram.freq$Terms, "\\s+(?=[^\\s]+$)", perl = TRUE)
         
         message("Transposing splitted n-grams for merge")
-        splitted <- as.data.frame(transpose(splitted),
+        splitted <- as.data.frame(data.table::transpose(splitted),
                                   col.names = c("Prefix", "Suffix"))
         
         message("Merging splitted n-grams to the source data")
         cbind(ngram.freq, splitted)
+    }
+    
+    # Collapse n-gram frequency table by keeping for each prefix only a row
+    # with the most frequently encountered suffix. If for a particular prefix
+    # several suffixes have the same maximum frequency, use any one of them.
+    # The returned data frame is sorted by the prefix ascending, so that one
+    # may use it for a binary search.
+    ngram.collapse.n <- function(ngram.freq.enriched) {
+        ngram.freq.enriched %>%
+            select(Prefix, Suffix, Freq) %>%
+            group_by(Prefix) %>%
+            top_n(1, Freq) %>%
+            arrange(Prefix)
+    }
+    
+    all.ngram.collapsed.cache <- function(n) {
+        all.ngram.collapsed.file <- paste0("cache/all.", n, "gram.collapsed.RDS")
+        if (!file.exists(all.ngram.collapsed.file)) {
+            # Load the frequency table.
+            all.ngram.freq <- all.ngram.freq.cache(n)
+            
+            # Enrich the frequency table.
+            message("Enriching the frequency table for ", n, "-grams")
+            all.ngram.freq <- ngram.enrich.n(all.ngram.freq)
+            
+            # Collapse the frequency table.
+            message("Collapsing the frequency table for ", n, "-grams")
+            all.ngram.collapsed <- ngram.collapse.n(all.ngram.freq)
+
+            # Cache the frequency table.
+            message("Saving collapsed", n, "-grams")
+            saveRDS(all.ngram.collapsed, all.ngram.collapsed.file)
+            message("Done saving ", n, "-grams")
+        } else {
+            # Load the cached Collapsed Frequency Vector.
+            message("Loading collapsed ", n, "-grams")
+            all.ngram.collapsed <- readRDS(all.ngram.collapsed.file)
+            message("Done loading collapsed ", n, "-grams")
+        }
+        
+        all.ngram.collapsed
     }
 
     options(mc.cores = 2)
@@ -338,4 +380,10 @@
     # all.ngram.freq.cache(5)
     # all.ngram.freq.cache(6)
     
+    # all.ngram.collapsed.cache(2)
+    # all.ngram.collapsed.cache(3)
+    # all.ngram.collapsed.cache(4)
+    # all.ngram.collapsed.cache(5)
+    # all.ngram.collapsed.cache(6)
+
 # }
