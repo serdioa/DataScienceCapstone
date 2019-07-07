@@ -12,7 +12,6 @@
     library(data.table)
     library(fastmatch)
     library(parallel)
-    library(pbmcapply)
     library(quanteda)
     library(readr)
     library(dplyr)
@@ -323,12 +322,10 @@
         message("Splitting n-grams on prefix and postfix")
         splitted <- strsplit(ngram.freq$Terms, "\\s+(?=[^\\s]+$)", perl = TRUE)
         
-        message("Transposing splitted n-grams for merge")
-        splitted <- as.data.frame(data.table::transpose(splitted),
-                                  col.names = c("Prefix", "Suffix"))
-        
         message("Merging splitted n-grams to the source data")
-        cbind(ngram.freq, splitted)
+        ngram.freq %>%
+            mutate(Prefix = unlist(lapply(splitted, "[[", 1)),
+                   Suffix = unlist(lapply(splitted, "[[", 2)))
     }
     
     # Collapse n-gram frequency table by keeping for each prefix only a row
@@ -341,6 +338,7 @@
             select(Prefix, Suffix, Freq) %>%
             group_by(Prefix) %>%
             top_n(1, Freq) %>%
+            slice(1) %>%
             arrange(Prefix)
     }
     
