@@ -40,3 +40,7 @@ data/
 data-split/
 
 MilestoneReportWeek2_files/
+
+cache\.with-stop-words/
+
+cache\.without-stop-words/
