@@ -12,8 +12,10 @@
 # if (!exists('include.preprocess')) {
     include.preprocess <- TRUE
     
+    library(fastmatch)
     library(readr)
     library(parallel)
+    library(stopwords)
     library(stringr)
     
     split.sentences <- function(name, messageName) {
@@ -39,7 +41,7 @@
     
     # Remove URLs. The regular expression detects http(s) and ftp(s) protocols.
     preprocess.removeUrl <- function(x) gsub("(ht|f)tp(s?)://\\S+", "", x)
-    
+        
     # Remove e-mail addresses.
     # The regular expression from Stack Overflow:
     # https://stackoverflow.com/questions/201323/how-to-validate-an-email-address-using-a-regular-expression
@@ -49,9 +51,18 @@
     # (the character @ and the following word).
     preprocess.removeTagsAndHandles <- function(x) gsub("[@#]\\S+", "", x)
     
+    # Remove all underscore characters ("_").
+    # There are different occurence or underscore in the corpora.
+    # Sometimes several underscores are used to indicate a place to insert
+    # a word. Sometimes underscores are used as an emphasis. Finally, sometimes
+    # underscores are used to hide profanity.
+    # We replace underscores with space characters to keep words separated
+    # in case when underscores were used as separators.
+    preprocess.removeUnderscores <- function(x) gsub("_", " ", x)
+    
     # Surround punctuation marks which does not appear inside a word with space
-    # characters. Without this step, fragments with a missing space are transformed
-    # to a single non-existing word when punctuation is removed.
+    # characters. Without this step, fragments with a missing space are
+    # transformed to a single non-existing word when punctuation is removed.
     # Example: corpus contains
     # "I had the best day yesterday,it was like two kids in a candy store"
     # Without this step, "yesterday,it" is transformed to a non-existing word
@@ -59,67 +70,97 @@
     # "yesterday, it"
     preprocess.addMissingSpace <- function(x) gsub("[,()\":;”…]", " ", x)
     
+    # Split text on words. Keep the words uppercase.
+    preprocess.tokenize <- function(text) {
+        tokenizers::tokenize_words(text,
+                                   lowercase = FALSE,
+                                   simplify = TRUE,
+                                   strip_numeric = TRUE)
+    }
+    
     # Replace words in a sentence with replacements available from the table.
     # Keep words which are not in the replacement table "as is".
     # As a side effect, removes punctuation and transforms to a lower case.
-    replacements.text <- readr::read_csv("replacements.txt",
+    #
+    # Extract tokens to a separate variable to be able to use fast match.
+    replacements.tokens <- readr::read_csv("replacements.txt",
                                          col_names = c("token", "replacement"),
                                          col_types = list(col_character(), col_character()))
+    replacements.tokens.token <- replacements.tokens$token
+
+    # Prepare a vector with stopwords.
+    # The vector is cached to be able to use fast-search (fmatch).
+    stopwords.tokens <- stopwords::stopwords()
     
-    preprocess.replaceWords <- function(text, replacements) {
+    preprocess.replaceWords <- function(tokens) {
         # Replace character often used in the sample text instead of the
-        # upper quote in abbreviations.
-        text <- gsub("’", "'", text)
-        text <- gsub("\u0092", "'", text)
-        
-        # Split text on words. Keep the words uppercase.
-        tokens.orig <- tokenizers::tokenize_words(text,
-                                                  lowercase = FALSE,
-                                                  simplify = TRUE,
-                                                  strip_numeric = TRUE)
-        
-        # # Attempt to replace each word.
-        tokens.replaced <- sapply(tokens.orig, function(x) {
+        # upper single quote in abbreviations.
+        tokens <- gsub("’", "'", tokens)
+        tokens <- gsub("\u0092", "'", tokens)
+
+        # Attempt to replace each word.
+        tokens <- sapply(tokens, function(x) {
             # Search if a replacement exist.
-            replacement.index <- match(x, replacements$token)
-            if (is.na(replacement.index)) {
-                # Can't find a replacement, try lowercase.
-                replacement.index <- match(tolower(x), replacements$token)
-                if (is.na(replacement.index)) {
-                    # Still can't find a replacement, fall back on the token.
-                    return (x)
-                } else {
-                    # Found a replacement with lowercase. replace the token,
-                    # changing the first letter to uppercase.
-                    return (str_to_sentence(replacements$replacement[replacement.index]))
-                }
-            } else {
-                # Replace the token.
-                return (replacements$replacement[replacement.index])
-            }
+            replacement.index <- fmatch(x, replacements.tokens.token)
+            replacement.index.tolower <- fmatch(tolower(x), replacements.tokens.token)
+            
+            ifelse(!is.na(replacement.index),
+                   # Replace the token.
+                   replacements.tokens$replacement[replacement.index],
+                   # Can't find a replacement, try lowercase.
+                   ifelse(!is.na(replacement.index.tolower),
+                          # Found a replacement with lowercase. replace the token,
+                          # changing the first letter to uppercase.
+                          str_to_sentence(replacements.tokens$replacement[replacement.index.tolower]),
+                          # Still can't find a replacement, fall back on the token.
+                          x
+                   )
+            )
         }, USE.NAMES = FALSE)
-        paste(tokens.replaced, collapse = " ")
+        
+        tokens <- unlist(preprocess.tokenize(tokens))
+    }
+    
+    preprocess.removeStopwords <- function(tokens) {
+        # Step 1: look up lower-cased input in stopwords. The output is
+        # a vector with the same length as input, with NA where no match found
+        # and an index of a stopword where a stopword is found.
+        # Step 2: transform to a boolean vector where NA (no match found)
+        # are TRUE.
+        # Step 3: select only elements with TRUE, that is which are not matched
+        # as a stopword.
+        words.keep.index <- is.na(fmatch(tolower(tokens), stopwords.tokens))
+        tokens[words.keep.index]
+    }
+    
+    preprocess.removeNonEnglish <- function(tokens) {
+        # Valid characters:
+        # * A-Z, a-z
+        # * Extended Latin (accented): \u00c0 - \u00ff
+        # * Upper single quote
+        tokens.valid <- grepl("^[A-Za-z'\u00c0-\u00ff]+$", tokens)
+        tokens[tokens.valid]
     }
 
     # Add tokens representing start of a sentence.
     # STOS = Start Of Sentence.
-    preprocess.addSentenceTokens <- function(x) paste("STOS", x)
-    
-    # Collapse space characters: if there are more than 1 space character in a row,
-    # replace with a single one.
-    preprocess.collapseWhitespace <- function(x) gsub("\\s+", " ", x)
-    
+    preprocess.addSentenceTokens <- function(tokens) c("STOS", tokens)
+
     # Define severel functions and combine them in a pre-processing chain.
     preprocess.text <- function(x) {
         text <- preprocess.removeUrl(x)
         text <- preprocess.removeEmail(text)
         text <- preprocess.removeTagsAndHandles(text)
+        text <- preprocess.removeUnderscores(text)
         text <- preprocess.addMissingSpace(text)
-        text <- preprocess.replaceWords(text, replacements.text)
-        text <- preprocess.addSentenceTokens(text)
-        text <- preprocess.collapseWhitespace(text)
-     
-        return(text)
+        
+        tokens <- preprocess.tokenize(text)
+        tokens <- preprocess.replaceWords(tokens)
+#        tokens <- preprocess.removeStopwords(tokens)
+        tokens <- preprocess.removeNonEnglish(tokens)
+        tokens <- preprocess.addSentenceTokens(tokens)
+
+        paste(tokens, collapse = " ")
     }
     
     preprocess.file <- function(x, name, messageName) {
