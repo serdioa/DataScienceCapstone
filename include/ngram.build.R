@@ -290,7 +290,7 @@
         data.table(Terms = stems.freq$Terms[1:(256 * 256 - 1)])
     }
     
-    all.ngram.freq.cache <- function(n) {
+    all.ngram.freq.cache.n <- function(n) {
         all.ngram.freq.file <- paste0("cache/all.", n, "gram.freq.RDS")
         if (!file.exists(all.ngram.freq.file)) {
             # Load aggregated corpus in the global environment.
@@ -342,26 +342,46 @@
             arrange(Prefix)
     }
     
-    all.ngram.collapsed.cache <- function(n) {
-        all.ngram.collapsed.file <- paste0("cache/all.", n, "gram.collapsed.RDS")
-        if (!file.exists(all.ngram.collapsed.file)) {
+    all.ngram.enrich.cache.n <- function(n) {
+        all.ngram.enriched.file <- paste0("cache/all.", n, "gram.enriched.RDS")
+        if (!file.exists(all.ngram.enriched.file)) {
             # Load the frequency table.
-            all.ngram.freq <- all.ngram.freq.cache(n)
+            all.ngram.freq <- all.ngram.freq.cache.n(n)
             
             # Enrich the frequency table.
             message("Enriching the frequency table for ", n, "-grams")
-            all.ngram.freq <- ngram.enrich.n(all.ngram.freq)
+            all.ngram.enriched <- ngram.enrich.n(all.ngram.freq)
+
+            # Cache the enriched frequency table.
+            message("Saving enriched ", n, "-grams")
+            saveRDS(all.ngram.enriched, all.ngram.enriched.file)
+            message("Done saving enriched ", n, "-grams")
+        } else {
+            # Load the cached enriched frequency table.
+            message("Loading enriched ", n, "-grams")
+            all.ngram.enriched <- readRDS(all.ngram.enriched.file)
+            message("Done loading enriched ", n, "-grams")
+        }
+        
+        all.ngram.enriched
+    }
+    
+    all.ngram.collapsed.cache.n <- function(n) {
+        all.ngram.collapsed.file <- paste0("cache/all.", n, "gram.collapsed.RDS")
+        if (!file.exists(all.ngram.collapsed.file)) {
+            # Load the enriched frequency table.
+            all.ngram.enriched <- all.ngram.enrich.cache.n(n)
             
-            # Collapse the frequency table.
+            # Collapse the enriched frequency table.
             message("Collapsing the frequency table for ", n, "-grams")
-            all.ngram.collapsed <- ngram.collapse.n(all.ngram.freq)
+            all.ngram.collapsed <- ngram.collapse.n(all.ngram.enriched)
 
             # Cache the frequency table.
             message("Saving collapsed ", n, "-grams")
             saveRDS(all.ngram.collapsed, all.ngram.collapsed.file)
             message("Done saving collapsed ", n, "-grams")
         } else {
-            # Load the cached Collapsed Frequency Vector.
+            # Load the cached collapsed frequency table.
             message("Loading collapsed ", n, "-grams")
             all.ngram.collapsed <- readRDS(all.ngram.collapsed.file)
             message("Done loading collapsed ", n, "-grams")
@@ -370,18 +390,27 @@
         all.ngram.collapsed
     }
 
+    all.ngram.freq.cache <- function() {
+        for (i in 2:6) {
+            all.ngram.freq.cache.n(i)
+            gc(reset = TRUE, full = TRUE)
+        }
+    }
+    
+    all.ngram.enrich.cache <- function() {
+        for (i in 2:6) {
+            all.ngram.enrich.cache.n(i)
+            gc(reset = TRUE, full = TRUE)
+        }
+    }
+    
+    all.ngram.collapse.cache <- function() {
+        for (i in 2:6) {
+            all.ngram.collapse.cache.n(i)
+            gc(reset = TRUE, full = TRUE)
+        }
+    }
+
     options(mc.cores = 2)
-    
-    # all.ngram.freq.cache(2)
-    # all.ngram.freq.cache(3)
-    # all.ngram.freq.cache(4)
-    # all.ngram.freq.cache(5)
-    # all.ngram.freq.cache(6)
-    
-    # all.ngram.collapsed.cache(2)
-    # all.ngram.collapsed.cache(3)
-    # all.ngram.collapsed.cache(4)
-    # all.ngram.collapsed.cache(5)
-    # all.ngram.collapsed.cache(6)
 
 # }
