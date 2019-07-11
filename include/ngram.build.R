@@ -47,45 +47,7 @@
         message("Transforming the Document Feature Matrix to a Feature Vector")
         dfm2fv(text.dfm)
     }
-    
-    ngram.build.n.1 <- function(text, n) {
-        if (n < 2) {
-            stop("invalid n for building n-grams:", n)
-        }
-        
-        # Split text on 1-grams.
-        message("Splitting text on tokens")
-        text.tokens <- tokens(text)
-        
-        # Build n-grams.
-        message("Building ", n, "-grams")
-        text.tokens <- unlist(tokens_ngrams(text.tokens, n = n, concatenator = " "),
-                              use.names = FALSE)
-        
-        # Normalize n-grams.
-        message("Normalizing ", n, "-grams")
-        text.tokens <- mclapply(text.tokens, function(x) {
-            # Split on words again.
-            x.words <- unlist(tokens(x))
 
-            # Transform the first n-1 words to stems and to the lower case.
-            x.words[1:n-1] <- ifelse(x.words[1:n-1] == "STOS",
-                                     x.words[1:n-1],
-                                     SnowballC::wordStem(tolower(x.words[1:n-1]), language = "en"))
-
-            # Concatenate words back to a single token.            
-            tmp <- paste0(x.words, collapse = " ")
-        })
-        
-        # Calculate the Document Feature Matrix
-        message("Calculating the Document Feature Matrix")
-        text.dfm <- dfm(as.tokens(text.tokens), tolower = FALSE)
-        
-        # Transform to a Feature Vector
-        message("Transforming the Document Feature Matrix to a Feature Vector")
-        dfm2fv(text.dfm)
-    }
-    
     ngram.build.n <- function(text, n) {
         if (n < 2) {
             stop("invalid n for building n-grams:", n)
@@ -298,7 +260,11 @@
             
             # Calculate the Frequency Vector
             message("Building ", n, "-grams")
-            all.ngram.freq <- ngram.build.n(all.text.preprocessed, n)
+            if (n == 1) {
+                all.ngram.freq <- ngram.build.1(all.text.preprocessed)
+            } else {
+                all.ngram.freq <- ngram.build.n(all.text.preprocessed, n)
+            }
             message("Done building ", n, "-grams")
             
             # Cache the Frequency Vector.
@@ -323,9 +289,16 @@
         splitted <- strsplit(ngram.freq$Terms, "\\s+(?=[^\\s]+$)", perl = TRUE)
         
         message("Merging splitted n-grams to the source data")
-        ngram.freq %>%
-            mutate(Prefix = unlist(lapply(splitted, "[[", 1)),
-                   Suffix = unlist(lapply(splitted, "[[", 2)))
+        if (length(splitted[[1]]) > 1) {
+            ngram.freq %>%
+                mutate(Prefix = unlist(lapply(splitted, "[[", 1)),
+                       Suffix = unlist(lapply(splitted, "[[", 2)))
+        } else {
+            # Attempted to split 1-grams. No prefixes are available.
+            ngram.freq %>%
+                mutate(Prefix = NA,
+                       Suffix = unlist(lapply(splitted, "[[", 1)))
+        }
     }
     
     # Collapse n-gram frequency table by keeping for each prefix only a row
@@ -391,14 +364,14 @@
     }
 
     all.ngram.freq.cache <- function() {
-        for (i in 2:6) {
+        for (i in 1:6) {
             all.ngram.freq.cache.n(i)
             gc(reset = TRUE, full = TRUE)
         }
     }
     
     all.ngram.enrich.cache <- function() {
-        for (i in 2:6) {
+        for (i in 1:6) {
             all.ngram.enrich.cache.n(i)
             gc(reset = TRUE, full = TRUE)
         }
