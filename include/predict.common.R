@@ -27,13 +27,13 @@
     }
 
     # Get cached variable.
-    get.var.cache <- function(var.name, var.build, removeStopwords = FALSE) {
+    get.var.cache <- function(var.name, var.build, removeStopwords = FALSE, var.persist = TRUE) {
         cache <- get.cache(removeStopwords)
         if (exists(var.name, where = cache)) {
             get(var.name, envir = cache)
         } else {
             file.name <- paste0(cache.dir(removeStopwords), "/", var.name, ".RDS")
-            if (file.exists(file.name)) {
+            if (var.persist & file.exists(file.name)) {
                 message("Loading ", var.name, " from ", file.name)
                 var <- readRDS(file.name)
                 assign(var.name, var, envir = cache)
@@ -43,8 +43,10 @@
                 var <- var.build()
                 assign(var.name, var, envir = cache)
                 
-                message("Saving ", var.name, " to ", file.name)
-                saveRDS(var, var.name)
+                if (var.persist) {
+                    message("Saving ", var.name, " to ", file.name)
+                    saveRDS(var, file.name)
+                }
                 var
             }
         }
@@ -70,6 +72,15 @@
         }
         get.var.cache(var.name, var.build, removeStopwords)
     }
+    
+    # Loads frequency table with n-grams splitted on prefix and suffix.
+    table.ngram.enriched.cache <- function(n, removeStopwords = FALSE) {
+        var.name <- paste0("all.", n, "gram.enriched")
+        var.build <- function() {
+            warn("Can't load enriched ", n, "-grams: expected to be available")
+        }
+        get.var.cache(var.name, var.build, removeStopwords)
+    }
 
     # Keep the word, if it is included in the table with top stems.
     # Otherwise, replaces the word with the specified token.
@@ -87,7 +98,9 @@
     
     # Pre-process text before predicting next word based on the text.
     # Returns character vector with words.
-    preprocess.text <- function(data.text, removeStopwords = FALSE) {
+    preprocess.text <- function(data.text, removeStopwords = FALSE,
+                                replaceWords = TRUE,
+                                add.sentence.tokens = TRUE) {
         # Split the text on sentences and keep only the last one.
         data.sentences <- unlist(tokenizers::tokenize_sentences(data.text))
         data.sentences.length <- length(data.sentences)
@@ -95,9 +108,8 @@
             return (NA)
         }
         text <- data.sentences[data.sentences.length]
-        
+
         # Load the top-frequency stems to keep.
-        message("removeStopwords.length=", length(removeStopwords))
         stems.freq.top <- stems.freq.top.cache(removeStopwords)
         
         # Preprocess the text.
@@ -106,15 +118,19 @@
         text <- preprocess.removeTagsAndHandles(text)
         text <- preprocess.removeUnderscores(text)
         text <- preprocess.addMissingSpace(text)
-        
+
         tokens <- preprocess.tokenize(text)
-        tokens <- preprocess.replaceWords(tokens)
+        if (replaceWords) {
+            tokens <- preprocess.replaceWords(tokens)
+        }
         if (removeStopwords) {
             tokens <- preprocess.removeStopwords(tokens)
         }
         tokens <- preprocess.removeNonEnglish(tokens)
         tokens <- preprocess.stem.word(tokens, stems.freq.top)
-        tokens <- preprocess.addSentenceTokens(tokens)
+        if (add.sentence.tokens) {
+            tokens <- preprocess.addSentenceTokens(tokens)
+        }
         
         tokens
     }
