@@ -19,95 +19,61 @@
         }
     }
     
-    table.enr.prefix.code <- function(Prefix, n, removeStopwords = FALSE) {
-        message("Encoding Prefix in ", n, "-gram frequency table ",
-                ifelse(removeStopwords, "without", "with"), " stop words ",
-                "for Stupid Backoff")
-
-        ngram.dict <- ngram.dict.cache(n - 1)
-        ngram.code <- ngram.code.cache(n - 1)
-        
-        Prefix.length <- length(Prefix)
-        if (n < 3) {
-            Prefix.Code <- integer(Prefix.length)
-        } else {
-            Prefix.Code <- numeric(Prefix.length)
-        }
-        
-        pb <- pbmcapply::progressBar(min = 0,
-                                     max = Prefix.length,
-                                     initial = 0)
-        for (i in 1:Prefix.length) {
-            Prefix.Code[i] <- ngram.code[fmatch(Prefix[i], ngram.dict)]
-            
-            if (i %% 100 == 0) setTxtProgressBar(pb, i)
-        }
-        close(pb)
-        
-        Prefix.Code
-    }
-    
+    # Enrich n-grams: add condition probability Suffix|Prefix, add prefix code.
     table.enr.build.tbl <- function(table.ngram, n, removeStopwords = FALSE) {
         message("Enriching ", n, "-gram frequency table ",
                 ifelse(removeStopwords, "without", "with"), " stop words ",
                 "for Stupid Backoff")
-
+        
+        ngram.dict <- ngram.dict.cache(n - 1, removeStopwords)
+        ngram.code <- ngram.code.cache(n - 1, removeStopwords)
+        
         table.ngram <- 
             table.ngram %>%
             group_by(Prefix) %>%
             mutate(SuffixProb = Freq / sum(Freq),
-                   SuffixProbLog = log(Freq) - log(sum(Freq)))
-        table.ngram$PrefixCode <- table.enr.prefix.code(table.ngram$Prefix, n,
-                                                        removeStopwords)
+                   SuffixProbLog = log(Freq) - log(sum(Freq)),
+                   PrefixCode = ngram.code[fmatch(Prefix, ngram.dict)])
 
         table.ngram
+    }
+    
+    # Enrich 1-grams: add condition probability Suffix|Prefix. Do not add
+    # prefix code since 1-grams do not have a suffix. 
+    table.enr.build.1 <- function(table.ngram, removeStopwords = FALSE) {
+        message("Enriching 1-gram frequency table ",
+                ifelse(removeStopwords, "without", "with"), " stop words ",
+                "for Stupid Backoff")
+        
+        table.ngram <- 
+            table.ngram %>%
+            mutate(SuffixProb = Freq / sum(Freq),
+                   SuffixProbLog = log(Freq) - log(sum(Freq)))
+        
+        table.ngram        
     }
     
     # Enrich n-grams: calculate probability of a suffix given prefix.
     table.enr.build <- function(n, removeStopwords = FALSE) {
         table.ngram <- table.ngram.enriched.cache(n, removeStopwords)
-        table.enr.build.tbl(table.ngram, n, removeStopwords)
-        
-        # message("Enriching ", n, "-grams ",
-        #         ifelse(removeStopwords, "without", "with"), " stop words ",
-        #         "with conditional probabilities")
-        # table.ngram %>% group_by(Prefix) %>% mutate(SuffixProb = Freq / sum(Freq))
-        # 
-        # # Transforming to data.table and setting the key for fast lookup.
-        # table.ngram <- data.table(table.ngram)
-        # setkey(table.ngram, "Prefix")
-        # table.ngram
+        if (n == 1) {
+            table.enr.build.1(table.ngram, removeStopwords)
+        } else {
+            table.enr.build.n(table.ngram, n, removeStopwords)
+        }
     }
     
     # Enrich and cache n-grams.
-    table.ngram.enrich.cache.n <- function(n, removeStopwords = FALSE) {
-        # # If the variable already exist, just return it.
-        # var.name <- paste0("table.", n, ".enr.", ifelse(removeStopwords, "nosv", "sv"))
-        # cache <- get.cache()
-        # if (exists(var.name, envir = cache)) {
-        #     var <- get(var.name, envir = cache)
-        # } else {
-        #     # if the file already exist, read from it.
-        #     var.file <- paste0(cache.dir(removeStopwords), "/", var.name, ".RDS")
-        #     if (file.exists(var.file)) {
-        #         message("Loading ", n, "-grams ",
-        #                 ifelse(removeStopwords, "without", "with"), " stop words ",
-        #                 "with conditional probabilities")
-        #         var <- readRDS(var.file)
-        #     } else {
-        #         # ... otherwise calculate and save in the file.
-        #         var <- table.ngram.enrich.n(n, removeStopwords)
-        #         
-        #         message("Saving ", n, "-grams ",
-        #                 ifelse(removeStopwords, "without", "with"), " stop words ",
-        #                 "with conditional probabilities")
-        #         saveRDS(var, var.file)
-        #     }
-        #     
-        #     # Put in the memory cache.
-        #     assign(var.name, var, envir = cache)
-        # }
+    table.enr.cache <- function(n, removeStopwords = FALSE) {
+        var.name <- paste0("table.", n, ".enr")
+        var.build <- function() {
+            table.enr.build(n, removeStopwords)
+        }
+        
+        get.var.cache(var.name, var.build, removeStopwords)
     }
+    
+    # Pre-calculate enriched tables for all N.
 
     # Prefix is a character vector with tokens.    
     predict.candidates <- function(prefix, n = 5, removeStopwords = FALSE, threshold = 5) {
@@ -175,20 +141,4 @@
         "I’m thankful my childhood was filled with imagination and bruises from playing",
         "I like how the same people are in almost all of Adam Sandler's"
     )
-    
-    #test.sample.tokens <- lapply(test.sample, preprocess.text)
-    
-    # test.sample.candidates <- lapply(test.sample.tokens, predict.candidates, n = 5)
-
-    #table.ngram.enrich.cache.n(1)
-    #table.ngram.enrich.cache.n(2)
-    #table.ngram.enrich.cache.n(3)
-    #table.ngram.enrich.cache.n(4)
-    #table.ngram.enrich.cache.n(5)
-    
-    #table.ngram.enrich.cache.n(1, TRUE)
-    #table.ngram.enrich.cache.n(2, TRUE)
-    #table.ngram.enrich.cache.n(3, TRUE)
-    #table.ngram.enrich.cache.n(4, TRUE)
-    #table.ngram.enrich.cache.n(5, TRUE)
 # }
