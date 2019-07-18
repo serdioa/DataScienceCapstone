@@ -74,6 +74,56 @@
     }
     
     # Pre-calculate enriched tables for all N.
+    table.enr.all <- function() {
+        for (n in 1:5) {
+            table.enr.cache(n)
+            table.enr.cache(n, removeStopwords = TRUE)
+        }
+    }
+    
+    # Optimize n-grams for Stupid Backoff algorithm.
+    # threshold - the maximum frequency of n-grams to discard.
+    table.optimize.sb.build.n <- function(table.ngram, threshold, removeStopwords = FALSE) {
+        # Keep only relevant columns.
+        # Sort by probability descending.
+        table.ngram <- table.ngram %>%
+            ungroup() %>%
+            filter(Freq > threshold) %>%
+            transmute(PrefixCode = PrefixCode,
+                      Suffix = Suffix,
+                      Prob = as.integer(SuffixProbLog * 1000)) %>%
+            arrange(desc(Prob))
+        
+        # Transform to data.table.
+        data.table(table.ngram, key = c("PrefixCode"))
+    }
+    
+    table.optimize.sb.build.1 <- function(table.ngram, threshold, removeStopwords = FALSE) {
+        # Keep only relevant columns.
+        table.ngram %>%
+            filter(Freq > threshold) %>%
+            transmute(Suffix = Suffix,
+                      Prob = as.integer(SuffixProbLog * 1000)) %>%
+            arrange(desc(Prob))
+    }
+    
+    table.optimize.sb.bulid <- function(n, threshold = 5, removeStopwords = FALSE) {
+        table.ngram <- table.enr.cache(n, removeStopwords)
+        if (n == 1) {
+            table.optimize.sb.build.1(table.ngram, threshold, removeStopwords)
+        } else {
+            table.optimize.sb.build.n(table.ngram, threshold, removeStopwords)
+        }
+    }
+    
+    table.optimize.sb.cache <- function(n, threshold = 5, removeStopwords = FALSE) {
+        var.name <- paste0("table.sb.", n, ".", threshold)
+        var.build <- function() {
+            table.optimize.sb.bulid(n, threshold, removeStopwords)
+        }
+        
+        get.var.cache(var.name, var.build, removeStopwords)
+    }
 
     # Prefix is a character vector with tokens.    
     predict.candidates <- function(prefix, n = 5, removeStopwords = FALSE, threshold = 5) {
