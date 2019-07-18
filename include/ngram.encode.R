@@ -31,14 +31,11 @@
         readBin(value, what = "numeric")
     }
     
-    # Load top frequency stems.
-    # stems.freq.top.cache(removeStopwords = FALSE)
-    
     dict.stems.cache <- function(removeStopwords = FALSE) {
         var.name <- "dict.stems"
         var.build <- function() {
             stems.freq.top <- stems.freq.top.cache(removeStopwords)
-            c(stems.freq.top, "UNK")
+            c("UNK", stems.freq.top)
         }
         
         get.var.cache(var.name, var.build, removeStopwords)
