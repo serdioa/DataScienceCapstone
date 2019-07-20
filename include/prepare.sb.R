@@ -20,7 +20,7 @@
     }
     
     # Enrich n-grams: add condition probability Suffix|Prefix, add prefix code.
-    table.enr.build.tbl <- function(table.ngram, n, removeStopwords = FALSE) {
+    table.enr.build.n <- function(table.ngram, n, removeStopwords = FALSE) {
         message("Enriching ", n, "-gram frequency table ",
                 ifelse(removeStopwords, "without", "with"), " stop words ",
                 "for Stupid Backoff")
@@ -91,7 +91,7 @@
             filter(Freq > threshold) %>%
             transmute(PrefixCode = PrefixCode,
                       Suffix = Suffix,
-                      Prob = as.integer(SuffixProbLog * 1000)) %>%
+                      Prob = as.integer(SuffixProbLog * 1000000)) %>%
             arrange(desc(Prob))
         
         # Transform to data.table.
@@ -100,10 +100,13 @@
     
     table.optimize.sb.build.1 <- function(table.ngram, threshold, removeStopwords = FALSE) {
         # Keep only relevant columns.
+        # For 1-grams, remove an entry with the special suffix "STOS"
+        # (Start-of-sentence), since we are not going to predict it.
         table.ngram %>%
             filter(Freq > threshold) %>%
+            filter(Suffix != "STOS") %>%
             transmute(Suffix = Suffix,
-                      Prob = as.integer(SuffixProbLog * 1000)) %>%
+                      Prob = as.integer(SuffixProbLog * 1000000)) %>%
             arrange(desc(Prob))
     }
     
@@ -123,5 +126,19 @@
         }
         
         get.var.cache(var.name, var.build, removeStopwords)
+    }
+    
+    table.optimize.sb.all <- function() {
+        table.sb.1 <- table.optimize.sb.cache(1)
+        table.sb.2 <- table.optimize.sb.cache(2)
+        table.sb.3 <- table.optimize.sb.cache(3)
+        table.sb.4 <- table.optimize.sb.cache(4)
+        table.sb.5 <- table.optimize.sb.cache(5)
+        
+        table.sb.1 <- table.optimize.sb.cache(1, removeStopwords = TRUE)
+        table.sb.2 <- table.optimize.sb.cache(2, removeStopwords = TRUE)
+        table.sb.3 <- table.optimize.sb.cache(3, removeStopwords = TRUE)
+        table.sb.4 <- table.optimize.sb.cache(4, removeStopwords = TRUE)
+        table.sb.5 <- table.optimize.sb.cache(5, removeStopwords = TRUE)
     }
 # }

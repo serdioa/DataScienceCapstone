@@ -1,172 +1,217 @@
 #
 # Prediction using Stupid Backoff estimation.
 #
-# if (!exists('predict.sb')) {
-    predict.sb <- TRUE
+# if (!exists('prepare.sb')) {
+    prepare.sb <- TRUE
 
-    library(data.table)
-    library(dplyr)
-    library(rlang)
-    source("include/predict.common.R")
-    source("include/ngram.encode.R")
+    source("include/prepare.sb.R")
     
-    # Return name of the directory with cached files with or without stop words.
-    cache.dir <- function(removeStopwords = FALSE) {
-        if (removeStopwords) {
-            "cache.without-stop-words"
+    # Transorms the probability from the filtered table from log to standard.
+    sb.probability.word.prob <- function(table.found) {
+        if (nrow(table.found) > 0) {
+            # Transform from Log to normal probability.
+            exp(table.found$Prob / 1000000)
         } else {
-            "cache.with-stop-words"
-        }
+            # Now data found, return NA.
+            NA
+        }        
     }
     
-    # Enrich n-grams: add condition probability Suffix|Prefix, add prefix code.
-    table.enr.build.tbl <- function(table.ngram, n, removeStopwords = FALSE) {
-        message("Enriching ", n, "-gram frequency table ",
-                ifelse(removeStopwords, "without", "with"), " stop words ",
-                "for Stupid Backoff")
+    sb.probability.word.1 <- function(suffix, removeStopwords = FALSE) {
+        # Load n-grams.
+        table.sb <- table.optimize.sb.cache(1, 5, removeStopwords)
         
-        ngram.dict <- ngram.dict.cache(n - 1, removeStopwords)
-        ngram.code <- ngram.code.cache(n - 1, removeStopwords)
+        # Search by suffix.
+        table.found <- table.sb %>% filter(Suffix == suffix)
+        sb.probability.word.prob(table.found)
+    }
         
-        table.ngram <- 
-            table.ngram %>%
-            group_by(Prefix) %>%
-            mutate(SuffixProb = Freq / sum(Freq),
-                   SuffixProbLog = log(Freq) - log(sum(Freq)),
-                   PrefixCode = ngram.code[fmatch(Prefix, ngram.dict)])
+    sb.probability.word.2 <- function(prefix.tokens, suffix, removeStopwords = FALSE) {
+        # Load n-grams.
+        table.sb <- table.optimize.sb.cache(2, 5, removeStopwords)
+        
+        # Encode prefix.
+        dict.hash <- dict.hash.cache(removeStopwords)
+        prefix.code <- tokens.encode.1(tail(prefix.tokens, 1), dict.hash)
 
-        table.ngram
+        # Search by prefix, filter by suffix.
+        table.found <- table.sb[.(prefix.code)][Suffix == suffix]
+        sb.probability.word.prob(table.found)
     }
     
-    # Enrich 1-grams: add condition probability Suffix|Prefix. Do not add
-    # prefix code since 1-grams do not have a suffix. 
-    table.enr.build.1 <- function(table.ngram, removeStopwords = FALSE) {
-        message("Enriching 1-gram frequency table ",
-                ifelse(removeStopwords, "without", "with"), " stop words ",
-                "for Stupid Backoff")
+    sb.probability.word.3 <- function(prefix.tokens, suffix, removeStopwords = FALSE) {
+        # Load n-grams.
+        table.sb <- table.optimize.sb.cache(3, 5, removeStopwords)
         
-        table.ngram <- 
-            table.ngram %>%
-            mutate(SuffixProb = Freq / sum(Freq),
-                   SuffixProbLog = log(Freq) - log(sum(Freq)))
-        
-        table.ngram        
-    }
-    
-    # Enrich n-grams: calculate probability of a suffix given prefix.
-    table.enr.build <- function(n, removeStopwords = FALSE) {
-        table.ngram <- table.ngram.enriched.cache(n, removeStopwords)
-        if (n == 1) {
-            table.enr.build.1(table.ngram, removeStopwords)
-        } else {
-            table.enr.build.n(table.ngram, n, removeStopwords)
-        }
-    }
-    
-    # Enrich and cache n-grams.
-    table.enr.cache <- function(n, removeStopwords = FALSE) {
-        var.name <- paste0("table.", n, ".enr")
-        var.build <- function() {
-            table.enr.build(n, removeStopwords)
-        }
-        
-        get.var.cache(var.name, var.build, removeStopwords)
-    }
-    
-    # Pre-calculate enriched tables for all N.
-    table.enr.all <- function() {
-        for (n in 1:5) {
-            table.enr.cache(n)
-            table.enr.cache(n, removeStopwords = TRUE)
-        }
-    }
-    
-    # Optimize n-grams for Stupid Backoff algorithm.
-    # threshold - the maximum frequency of n-grams to discard.
-    table.optimize.sb.build.n <- function(table.ngram, threshold, removeStopwords = FALSE) {
-        # Keep only relevant columns.
-        # Sort by probability descending.
-        table.ngram <- table.ngram %>%
-            ungroup() %>%
-            filter(Freq > threshold) %>%
-            transmute(PrefixCode = PrefixCode,
-                      Suffix = Suffix,
-                      Prob = as.integer(SuffixProbLog * 1000)) %>%
-            arrange(desc(Prob))
-        
-        # Transform to data.table.
-        data.table(table.ngram, key = c("PrefixCode"))
-    }
-    
-    table.optimize.sb.build.1 <- function(table.ngram, threshold, removeStopwords = FALSE) {
-        # Keep only relevant columns.
-        table.ngram %>%
-            filter(Freq > threshold) %>%
-            transmute(Suffix = Suffix,
-                      Prob = as.integer(SuffixProbLog * 1000)) %>%
-            arrange(desc(Prob))
-    }
-    
-    table.optimize.sb.bulid <- function(n, threshold = 5, removeStopwords = FALSE) {
-        table.ngram <- table.enr.cache(n, removeStopwords)
-        if (n == 1) {
-            table.optimize.sb.build.1(table.ngram, threshold, removeStopwords)
-        } else {
-            table.optimize.sb.build.n(table.ngram, threshold, removeStopwords)
-        }
-    }
-    
-    table.optimize.sb.cache <- function(n, threshold = 5, removeStopwords = FALSE) {
-        var.name <- paste0("table.sb.", n, ".", threshold)
-        var.build <- function() {
-            table.optimize.sb.bulid(n, threshold, removeStopwords)
-        }
-        
-        get.var.cache(var.name, var.build, removeStopwords)
-    }
+        # Encode prefix.
+        dict.hash <- dict.hash.cache(removeStopwords)
+        prefix.code <- tokens.encode.2(tail(prefix.tokens, 2), dict.hash)
 
-    # Prefix is a character vector with tokens.    
-    predict.candidates <- function(prefix, n = 5, removeStopwords = FALSE, threshold = 5) {
+        # Search by prefix, filter by suffix.
+        table.found <- table.sb[.(prefix.code)][Suffix == suffix]
+        sb.probability.word.prob(table.found)
+    }
+    
+    sb.probability.word.4 <- function(prefix.tokens, suffix, removeStopwords = FALSE) {
+        # Load n-grams.
+        table.sb <- table.optimize.sb.cache(4, 5, removeStopwords)
+        
+        # Encode prefix.
+        dict.hash <- dict.hash.cache(removeStopwords)
+        prefix.code <- tokens.encode.3(tail(prefix.tokens, 3), dict.hash)
+        
+        # Search by prefix, filter by suffix.
+        table.found <- table.sb[.(prefix.code)][Suffix == suffix]
+        sb.probability.word.prob(table.found)
+    }
+    
+    sb.probability.word.5 <- function(prefix.tokens, suffix, removeStopwords = FALSE) {
+        # Load n-grams.
+        table.sb <- table.optimize.sb.cache(5, 5, removeStopwords)
+        
+        # Encode prefix.
+        dict.hash <- dict.hash.cache(removeStopwords)
+        prefix.code <- tokens.encode.4(tail(prefix.tokens, 4), dict.hash)
+
+        # Search by prefix, filter by suffix.
+        table.found <- table.sb[.(prefix.code)][Suffix == suffix]
+        sb.probability.word.prob(table.found)
+    }
+    
+    # Suffix must be a single word.
+    sb.probability.word <- function(prefix, suffix, removeStopwords = FALSE) {
+        prefix.length = length(prefix)
+        prob = NA
+        
+        if (prefix.length >= 4) {
+            prob <- sb.probability.word.5(prefix, suffix, removeStopwords)
+            if (!is.na(prob)) {
+                found.length = 4
+            }
+        }
+        if (is.na(prob) && prefix.length >= 3) {
+            prob <- sb.probability.word.4(prefix, suffix, removeStopwords)
+            if (!is.na(prob)) {
+                found.length = 3
+            }
+        }
+        if (is.na(prob) && prefix.length >= 2) {
+            prob <- sb.probability.word.3(prefix, suffix, removeStopwords)
+            if (!is.na(prob)) {
+                found.length = 2
+            }
+        }
+        if (is.na(prob) && prefix.length >= 1) {
+            prob <- sb.probability.word.2(prefix, suffix, removeStopwords)
+            if (!is.na(prob)) {
+                found.length = 1
+            }
+        }
+        if (is.na(prob)) {
+            prob <- sb.probability.word.1(suffix, removeStopwords)
+            if (!is.na(prob)) {
+                found.length = 0
+            }
+        }
+        if (is.na(prob)) {
+            # Not found - return 0
+            0
+        } else {
+            prob * (0.4 ^ (min(4, prefix.length) - found.length))
+        }
+    }
+    
+    # Suffix may be a vector of words.
+    sb.probability <- function(prefix, suffix, removeStopwords = FALSE) {
+        suffix.length <- length(suffix)
+        prob <- numeric(suffix.length)
+        names(prob) <- suffix
+        
+        for (i in 1:suffix.length) {
+            prob[i] <- sb.probability.word(prefix, suffix[i], removeStopwords)
+        }
+        
+        prob
+    }
+    
+    sb.probability.text <- function(text, suffix, removeStopwords = FALSE) {
+        prefix.tokens <- preprocess.text(text, removeStopwords = removeStopwords)
+        sb.probability(prefix.tokens, suffix, removeStopwords = removeStopwords)
+    }
+    
+    # Predicts the next word following the specified tokens.
+    # 
+    # prefix - character vector with tokens.
+    # n - number of candidates to return.
+    sb.predict <- function(prefix, n = 5, removeStopwords = FALSE) {
         prefix.length <- length(prefix)
-        
-        candidates <- data.table(Prefix = character(),
+
+        # Load the table for encoding the prefixes.        
+        dict.hash <- dict.hash.cache(removeStopwords)
+
+        # Create a table to hold results.
+        candidates <- data.frame(Prefix = character(),
                                  Suffix = character(),
-                                 Freq = integer(),
+                                 N = integer(),
                                  SuffixProb = numeric(),
-                                 N = integer())
+                                 Score = numeric())
         
-        # Lookup in 5-grams.
-        for (i in 5:1) {
-            if (prefix.length >= (i - 1)) {
-                prefix.n <- ifelse(i > 1, paste0(tail(prefix, i - 1), collapse = " "), NA)
+        # Choose candidates from 5- to 2-grms.
+        # 1-grams (context-free prediction which completely ignores the prefix)
+        # are used only as the last resort if not enough candidates are found.
+        for (i in 4:1) {
+            if (prefix.length >= i) {
+                # Choose the right encoding function.
+                tokens.encode <- tokens.encode.n(i)
                 
-                table.ngram.n <- table.ngram.enrich.cache.n(i, removeStopwords)
-                
-                # Order by is not required: the table is already pre-sorted by
-                # conditional probability.
-                candidates.n <- table.ngram.n[.(prefix.n), .(Prefix, Suffix, Freq, SuffixProb), nomatch = NULL]
-                candidates.n <- candidates.n[Freq >= threshold]
-                candidates.n <- candidates.n[!(Suffix %in% candidates$Suffix)]
-                candidates.n <- head(candidates.n, n)
-                candidates.n.length <- nrow(candidates.n)
-                candidates.n[, ("N") := rep(i, candidates.n.length)]
-                #message("Candidates n=", i, ":")
-                #print(candidates.n)
-                
-                candidates <- rbind(candidates, candidates.n)
-                
-                n <- n - candidates.n.length
-                #message("Remaining candidates to find: ", n)
-                if (n <= 0) {
-                    break
+                # Encode the (i-1) part of the prefix.
+                prefix.n <- tail(prefix, i)
+                prefix.n.code <- tokens.encode(prefix.n, dict.hash)
+
+                # Choose candidates starting with our prefix from optimized
+                # table with n-grams.
+                table.ngram.n <- table.optimize.sb.cache(i + 1,
+                                                         removeStopwords = removeStopwords)
+                table.candidates.n <- table.ngram.n[.(prefix.n.code), nomatch = NULL][!(Suffix %in% candidates$Suffix)]
+
+                if (nrow(table.candidates.n) > 0) {
+                    table.candidates.n <- table.candidates.n %>%
+                        transmute(Prefix = paste0(prefix.n, collapse = " "),
+                                  Suffix = Suffix,
+                                  N = i,
+                                  SuffixProb = Prob,
+                                  Score = exp(Prob / 1000000 + log(0.4) * (min(4, prefix.length) - i)))
+
+                    candidates <- rbind(candidates, table.candidates.n)
                 }
             }
         }
         
-        message("Prefix: ", paste(prefix, collapse = " "))
-        print(candidates)
-
-        candidates
+        # If we still have not enough candidates, choose from 1-grams
+        # context-free, that is without taking the prefix in the consideration.
+        candidates.found <- nrow(candidates)
+        if (candidates.found < n) {
+            table.ngram.1 <- table.optimize.sb.cache(1, removeStopwords = removeStopwords)
+            table.candidates.1 <- table.ngram.1 %>%
+                filter(!(Suffix %in% candidates$Suffix)) %>%
+                transmute(Prefix = "",
+                          Suffix = Suffix,
+                          N = 0,
+                          SuffixProb = Prob,
+                          Score = exp(Prob / 1000000 + 4 * log(0.4))) %>%
+                head(n - candidates.found)
+            
+            candidates <- rbind(candidates, table.candidates.1)
+        }
+        
+        candidates %>%
+            arrange(desc(Score)) %>%
+            head(n)
+    }
+    
+    sb.predict.text <- function(text, n = 5, removeStopwords = FALSE) {
+        prefix.tokens <- preprocess.text(text, removeStopwords = removeStopwords)
+        sb.predict(prefix.tokens, n = n, removeStopwords = removeStopwords)
     }
     
     test.sample <- list(
@@ -191,4 +236,55 @@
         "I’m thankful my childhood was filled with imagination and bruises from playing",
         "I like how the same people are in almost all of Adam Sandler's"
     )
+    
+    test.candidates <- list(
+        c("soda", "beer", "cheese", "pretzels"),
+        c("world", "best", "most", "universe"),
+        c("happiest", "saddest", "smelliest", "bluest"),
+        c("referees", "crowd", "defense", "players"),
+        c("beach", "mall", "grocery", "movies"),
+        c("way", "motorcycle", "horse", "phone"),
+        c("weeks", "time", "thing", "years"),
+        c("fingers", "toes", "ears", "eyes"),
+        c("sad", "bad", "hard", "worse"),
+        c("insensitive", "callous", "insane", "asleep"),
+        c("sleep", "give", "die", "eat"),
+        c("horticultural", "financial", "marital", "spiritual"),
+        c("morning", "decade", "month", "weekend"),
+        c("sleepiness", "happiness", "stress", "hunger"),
+        c("minute", "look", "walk", "picture"),
+        c("account", "matter", "incident", "case"),
+        c("finger", "arm", "hand", "toe"),
+        c("side", "top", "center", "middle"),
+        c("weekly", "inside", "daily", "outside"),
+        c("pictures", "movies", "novels", "stories")
+    )
+    
+    sb.probability.test <- function(removeStopwords = FALSE) {
+        for (i in 1 : length(test.sample)) {
+            prefix <- test.sample[[i]]
+            prefix.tokens <- preprocess.text(prefix, removeStopwords = removeStopwords)
+            suffix.candidates <- test.candidates[[i]]
+            suffix.prob <- sb.probability(prefix.tokens, suffix.candidates, removeStopwords = removeStopwords)
+            
+            suffix.tbl <- data.frame(Suffix = suffix.candidates,
+                                     Score = suffix.prob) %>%
+                arrange(desc(Score))
+            
+            print(paste0("Prefix: ", prefix))
+            print(suffix.tbl)
+            print("")
+        }
+    }
+    
+    sb.predict.test <- function(removeStopwords = FALSE) {
+        for (i in 1 : length(test.sample)) {
+            prefix <- test.sample[[i]]
+            suffix.candidates <- sb.predict.text(prefix, n = 5, removeStopwords = removeStopwords)
+            
+            message("Prefix: ", prefix)
+            print(suffix.candidates)
+            print("")
+        }
+    }
 # }
