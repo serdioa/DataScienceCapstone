@@ -3,9 +3,11 @@
 #
 
 library(dplyr)
-library(pbapply)
+library(progress)
 library(readr)
 library(tokenizers)
+
+source("include/predict.sb.R")
 
 #
 # Load testing data.
@@ -37,72 +39,262 @@ predict.test.text.load <- function(source, type) {
 # of the provided text separated by whitespace characters. In addition, any
 # punctuation characters directly before or after the suffix are removed.
 #
-predict.test.build.samples <- function(text, prefix.min.tokens = 5) {
+predict.test.build.samples <- function(text, n, prefix.min.tokens = 5,
+                                       preprocess.suffix = FALSE) {
+    text.length <- length(text)
+    
     message("Tokenizing text")
     text.tokens <- tokenize_regex(text)
     
-    text.samples <- data.frame(Prefix = character(),
-                               Suffix = character())
-    
     message("Building samples")
-    pblapply(text.tokens, function(x) {
-        x.length <- length(x)
-        if (x.length > prefix.min.tokens) {
-            text.samples.count <- x.length - prefix.min.tokens
-            text.sample.prefix.tokens <- sapply(prefix.min.tokens:(x.length - 1),
-                                                function(n) head(x, n))
-            text.samples.prefix = sapply(text.sample.prefix.tokens,
-                                         function(x) paste0(x, collapse = " "),
-                                         simplify = TRUE)
-            text.samples.suffix = x[(prefix.min.tokens + 1):x.length]
-            text.samples.chunk <- data.frame(Prefix = as.character(text.samples.prefix),
-                                             Suffix = as.character(text.samples.suffix))
-            text.samples <<- rbind(text.samples, text.samples.chunk)
-        }
-    })
     
-    text.samples
+    sample.prefix <- character(n)
+    sample.suffix <- character(n)
+
+    pb <- txtProgressBar(min = 0,
+                         max = n,
+                         initial = 0,
+                         style = 3)
+    
+    i = 1
+    while (i <= n) {
+        # Select a sentence.
+        sentence.index <- sample(1 : text.length, 1)
+        sentence.tokens <- text.tokens[[sentence.index]]
+        sentence.length <- length(sentence.tokens)
+        
+        if (sentence.length > prefix.min.tokens) {
+            split.index <- sample((prefix.min.tokens + 1) : sentence.length, 1)
+            sample.suffix.i <- tail(sentence.tokens, -(split.index - 1))
+
+            # if (i == 15) {
+            #     message("sentence.tokens=")
+            #     print(sentence.tokens)
+            #     message("split.index=", split.index)
+            #     message("sample.prefix.i=")
+            #     print(head(sentence.tokens, split.index - 1))
+            #     message("sample.suffix.i=")
+            #     print(sample.suffix.i)
+            # }
+            
+            sample.suffix.i <- predict.test.preprocess.suffix(sample.suffix.i,
+                                                              heavy = preprocess.suffix)
+            
+            # If there is no suffix left, skip this sample.
+            if (is.na(sample.suffix.i)) {
+                next
+            }
+
+            sample.suffix[i] <- sample.suffix.i
+            sample.prefix[i] <- paste0(head(sentence.tokens, split.index - 1),
+                                       collapse = " ")
+            
+            i = i + 1
+            if (i %% 100 == 0) {
+                setTxtProgressBar(pb, i)
+            }
+        }
+    }
+    setTxtProgressBar(pb, i)
+    close(pb)
+    
+    data.frame(Prefix = as.character(sample.prefix),
+               Suffix = as.character(sample.suffix))
 }
 
-predict.test.cache.samples <- function(source, type, prefix.min.tokens = 5) {
-    samples.file.name <- file.path("cache", paste0("samples.", source, ".", type, ".RDS"))
+# We keep the prefix "as is", with all the troublesome characters,
+# but we may pre-process the suffix (the word to be predicted)
+# if requested, because we even do not attempt to predict some
+# tokens. Precision of prediction with and without pre-processing
+# is useful: the first shows how good our algorithm is when running
+# on a real-life text, the second shows how good our algorithm is
+# in performing on words which it is expected to predict at all.
+#
+# If the algorithm demonstrates bad performance on pre-processed suffixes,
+# that is on words it was programmed to predict, than the algorithm is bad
+# in what it was intended to do. On the other hand, if the algorithm is good
+# on pre-processed suffixes, but bad on a real-life text, that means that our
+# assumptions on what the algorithm should attempt to predict are wrong.
+#
+# We distinguish between a mandatory pre-processing of the suffix, and the
+# heavy pre-processing. The mandatory pre-processing is applied always, and
+# it prevents down-grading the algoritihm if, for example, it does not predict
+# punctuation marks.
+predict.test.preprocess.suffix <- function(suffix, heavy = FALSE, verbose = FALSE) {
+    if (heavy) {
+        suffix <- preprocess.removeUrl(suffix)
+        suffix <- preprocess.removeEmail(suffix)
+        suffix <- preprocess.removeTagsAndHandles(suffix)
+        suffix <- preprocess.removeUnderscores(suffix)
+    }
+    suffix <- preprocess.addMissingSpace(suffix)
+    if (verbose) {
+        message("preprocess(1)")
+        print(suffix)
+    }
+
+    # After adding space characters instead of the punctuation, our suffix
+    # may have been transformed to multiple words. We split it on tokens again,
+    # and continue simplifying.
+    suffix.empty <- grepl("^\\s*$", suffix)
+    suffix <- suffix[!suffix.empty]
+    
+    if (heavy) {
+        tokens <- unlist(preprocess.tokenize(suffix))
+    } else {
+        tokens <- unlist(tokenize_regex(suffix))
+    }
+    if (verbose) {
+        message("preprocess(2)")
+        print(tokens)
+    }
+    
+    if (heavy) {
+        tokens <- preprocess.replaceWords(tokens)
+        tokens <- preprocess.removeNonEnglish(tokens)
+    }
+    
+    # Remove tokens which contains only punctuation marks.
+    tokens.punctuation.idx <- grepl("^[,.!?()\":;”…-]+$", tokens)
+    tokens <- tokens[!tokens.punctuation.idx]
+
+    # After all the transformations some tokens may become empty strings.
+    # Remove them.
+    tokens.empty <- grepl("^\\s*$", tokens)
+    tokens <- tokens[!tokens.empty]
+    if (verbose) {
+        message("preprocess(3)")
+        print(tokens)
+    }
+    
+    ifelse(length(tokens) > 0, tokens[1], NA)
+}
+
+predict.test.cache.samples <- function(source, type, n, prefix.min.tokens = 5,
+                                       preprocess.suffix = FALSE) {
+    samples.file.name <- file.path("cache",
+                                   paste0("samples.", source, ".", type, ".",
+                                          preprocess.suffix, ".RDS"))
     if (file.exists(samples.file.name)) {
+        message("Loading samples (", source, ", ", type, ") from ", samples.file.name)
         readRDS(samples.file.name)
     } else {
         text <- predict.test.text.load(source, type)
-        samples <- predict.test.build.samples(text, prefix.min.tokens = prefix.min.tokens)
-        saveRDS(samples, samples.file.name)
+        samples <- predict.test.build.samples(text, n, prefix.min.tokens = prefix.min.tokens,
+                                              preprocess.suffix = preprocess.suffix) %>%
+            mutate(Source = source) %>%
+            mutate_if(is.factor, as.character)
+        
+#        message("Saving samples (", source, ", ", type, ") into ", samples.file.name)
+#        saveRDS(samples, samples.file.name)
         
         samples
     }
 }
 
-#
-# Choose the specified number of samples. The provided text samples expected
-# to be a data frame.
-#
-predict.test.select.samples <- function(text.samples, n) {
-    message("Selecting samples")
+predict.test.cache.samples.all <- function() {
+    predict.test.cache.samples("blogs", "testing", 1000000)
+    predict.test.cache.samples("news", "testing", 1000000)
+    predict.test.cache.samples("twitter", "testing", 1000000)
     
-    text.samples.length <- nrow(text.samples)
-    text.samples.idx <- sample(1:text.samples.length, n)
-    text.samples.selected <- text.samples[text.samples.idx, ]
-    rownames(text.samples.selected) <- NULL
-    
-    text.samples.selected
+    predict.test.cache.samples("blogs", "validation", 1000000)
+    predict.test.cache.samples("news", "validation", 1000000)
+    predict.test.cache.samples("twitter", "validation", 1000000)
 }
 
-#
-# Creates the specified number of samples from the given data source.
-# The data source is specified in the same way as in the function
-# predict.test.text.load().
-# The samples are enriched by an additional column "source" populated by the
-# name of the source.
-#
-predict.test.file.build.samples <- function(source, type, n, prefix.min.tokens = 5) {
-    text <- predict.test.text.load(source, type)
-    samples <- predict.test.build.samples(text, prefix.min.tokens = prefix.min.tokens)
-    predict.test.select.samples(samples, n) %>% mutate(Source = source)
+predict.test.algo <- function(samples, algo) {
+    samples.length <- nrow(samples)
+    
+    # Prepare storage for top 10 predicted candidates and their probabilities.
+    predicted <- data.frame(Predicted.1 = character(samples.length),
+                            Score.1 = numeric(samples.length),
+                            Predicted.2 = character(samples.length),
+                            Score.2 = numeric(samples.length),
+                            Predicted.3 = character(samples.length),
+                            Score.3 = numeric(samples.length),
+                            Predicted.4 = character(samples.length),
+                            Score.4 = numeric(samples.length),
+                            Predicted.5 = character(samples.length),
+                            Score.5 = numeric(samples.length),
+                            Predicted.6 = character(samples.length),
+                            Score.6 = numeric(samples.length),
+                            Predicted.7 = character(samples.length),
+                            Score.7 = numeric(samples.length),
+                            Predicted.8 = character(samples.length),
+                            Score.8 = numeric(samples.length),
+                            Predicted.9 = character(samples.length),
+                            Score.9 = numeric(samples.length),
+                            Predicted.10 = character(samples.length),
+                            Score.10 = numeric(samples.length),
+                            Match.Index = as.integer(rep(NA, samples.length))) %>%
+        mutate_if(is.factor, as.character)
+
+    message("Running prediction algorithm on ", samples.length, " samples")
+    
+    pb <- txtProgressBar(min = 0,
+                         max = samples.length,
+                         initial = 0,
+                         style = 3)
+    
+    for (i in 1 : samples.length) {
+        sample.prefix <- samples$Prefix[i]
+        sample.predicted <- algo(sample.prefix)
+
+        for (j in 1 : 10) {
+            if (nrow(sample.predicted) >= j) {
+                suffix.col <- paste0("Predicted.", j)
+                score.col <- paste0("Score.", j)
+                
+                sample.predicted.suffix <- sample.predicted[j, "Suffix"]
+                sample.predicted.score <- sample.predicted[j, "Score"]
+
+                predicted[i, suffix.col] <- sample.predicted.suffix
+                predicted[i, score.col] <- sample.predicted.score
+                
+                if (samples$Suffix[i] == sample.predicted.suffix) {
+                    predicted[i, "Match.Index"] <- j
+                }
+            }
+        }
+        
+        if (i %% 10 == 0) {
+            setTxtProgressBar(pb, i)
+        }
+    }
+    
+    setTxtProgressBar(pb, samples.length)
+    close(pb)
+
+    cbind(samples, predicted)
 }
 
+predict.test.sb <- function(source, type, n.samples = 100,
+                            preprocess.suffix = FALSE,
+                            threshold = 5, removeStopwords = FALSE) {
+    samples <- predict.test.cache.samples(source, type, n.samples,
+                                          preprocess.suffix = preprocess.suffix)
+    
+    algo <- function(x) sb.predict.text(x, n = 10, threshold = threshold,
+                                        removeStopwords = removeStopwords)
+    
+    predict.test.algo(samples, algo)
+}
 
+predict.test.sb.cache <- function(source, type, n.samples = 100,
+                                  preprocess.suffix = FALSE,
+                                  threshold = 5, removeStopwords = FALSE) {
+    file.name <- file.path("cache", paste0("predicted.", source, ".", type, ".", n.samples,
+                       ".prep-", preprocess.suffix, ".thr-", threshold,
+                       ".remsw-", removeStopwords, ".RDS"))
+    if (file.exists(file.name)) {
+        message("Loading predicted results from ", file.name)
+        readRDS(file.name)
+    } else {
+        message("Predicting results for ", file.name)
+        predicted <- predict.test.sb(source, type, n.samples, preprocess.suffix,
+                                     threshold, removeStopwords)
+        message("Saving predicted results to ", file.name)
+        saveRDS(predicted, file.name)
+        predicted
+    }
+}
