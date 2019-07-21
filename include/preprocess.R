@@ -68,7 +68,7 @@
     # Without this step, "yesterday,it" is transformed to a non-existing word
     # "yesterdayit" when removing punctuation. This step transforms it to
     # "yesterday, it"
-    preprocess.addMissingSpace <- function(x) gsub("[,()\":;”…]", " ", x)
+    preprocess.addMissingSpace <- function(x) gsub("[,.!?()\":;”…]", " ", x)
     
     # Split text on words. Keep the words uppercase.
     preprocess.tokenize <- function(text) {
