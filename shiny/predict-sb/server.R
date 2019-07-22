@@ -21,12 +21,13 @@ shinyServer(function(input, output, session) {
     
     getReactiveTextPrediction <- reactive({
         textPrefix <- input$textPrefix
+        predict.partial <- input$predictPartial
         n <- input$n.predictions
-        
+
         if (nchar(trimws(textPrefix)) == 0) {
             NULL
         } else {
-            sb.predict.text(textPrefix, n)
+            sb.predict.text(textPrefix, predict.partial = predict.partial, n)
         }
     })
 
