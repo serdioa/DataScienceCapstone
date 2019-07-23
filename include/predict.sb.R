@@ -144,6 +144,9 @@
     # prefix - character vector with tokens.
     # n - number of candidates to return.
     sb.predict <- function(prefix, n = 5, threshold = 5, removeStopwords = FALSE) {
+        # Make the threshold the right length.
+        threshold <- rep(threshold, length.out = 5)
+        
         prefix.length <- length(prefix)
 
         # Load the table for encoding the prefixes.        
@@ -171,7 +174,7 @@
                 # Choose candidates starting with our prefix from optimized
                 # table with n-grams.
                 table.ngram.n <- table.optimize.sb.cache(i + 1,
-                                                         threshold = threshold,
+                                                         threshold = threshold[i + 1],
                                                          removeStopwords = removeStopwords)
                 table.candidates.n <- table.ngram.n[.(prefix.n.code), nomatch = NULL][!(Suffix %in% candidates$Suffix)]
 
@@ -192,7 +195,8 @@
         # context-free, that is without taking the prefix in the consideration.
         candidates.found <- nrow(candidates)
         if (candidates.found < n) {
-            table.ngram.1 <- table.optimize.sb.cache(1, removeStopwords = removeStopwords)
+            table.ngram.1 <- table.optimize.sb.cache(1, threshold = threshold[1],
+                                                     removeStopwords = removeStopwords)
             table.candidates.1 <- table.ngram.1 %>%
                 filter(!(Suffix %in% candidates$Suffix)) %>%
                 transmute(Prefix = "",
