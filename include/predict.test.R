@@ -39,8 +39,8 @@ predict.test.text.load <- function(source, type) {
 # of the provided text separated by whitespace characters. In addition, any
 # punctuation characters directly before or after the suffix are removed.
 #
-predict.test.build.samples <- function(text, n, prefix.min.tokens = 5,
-                                       preprocess.suffix = FALSE) {
+predict.test.build.samples.intern <- function(text, n, prefix.min.tokens = 5,
+                                              preprocess.suffix = FALSE) {
     text.length <- length(text)
     
     message("Tokenizing text")
@@ -67,16 +67,6 @@ predict.test.build.samples <- function(text, n, prefix.min.tokens = 5,
             split.index <- sample((prefix.min.tokens + 1) : sentence.length, 1)
             sample.suffix.i <- tail(sentence.tokens, -(split.index - 1))
 
-            # if (i == 15) {
-            #     message("sentence.tokens=")
-            #     print(sentence.tokens)
-            #     message("split.index=", split.index)
-            #     message("sample.prefix.i=")
-            #     print(head(sentence.tokens, split.index - 1))
-            #     message("sample.suffix.i=")
-            #     print(sample.suffix.i)
-            # }
-            
             sample.suffix.i <- predict.test.preprocess.suffix(sample.suffix.i,
                                                               heavy = preprocess.suffix)
             
@@ -170,6 +160,53 @@ predict.test.preprocess.suffix <- function(suffix, heavy = FALSE, verbose = FALS
     ifelse(length(tokens) > 0, tokens[1], NA)
 }
 
+# Builds samples to test prediction from the specified text.
+predict.test.build.samples.source <- function(source, type, n,
+                                              prefix.min.tokens = 5,
+                                              preprocess.suffix = FALSE) {
+        text <- predict.test.text.load(source, type)
+        samples <- predict.test.build.samples.intern(text, n = n,
+                                                     prefix.min.tokens = prefix.min.tokens,
+                                                     preprocess.suffix = preprocess.suffix) %>%
+            mutate(Source = source) %>%
+            mutate_if(is.factor, as.character)
+        
+        samples
+    }
+
+# Builds samples to test prediction from the specified text, or from all texts
+# if the source = "all".
+predict.test.build.samples <- function(source, type, n, prefix.min.tokens = 5,
+                                       preprocess.suffix = FALSE) {
+    if (source == "all") {
+        # R do not have out-of-the-box function to split an integer on
+        # approximately equal parts, so we have to use a simple ad-hoc solution
+        # for just 3 groups (blogs, news, twitter).
+        n.blogs <- floor(n / 3)
+        n.news <- floor(n / 3)
+        n.twitter <- n - n.blogs - n.news
+        
+        # Get the required number of samples.
+        samples.blogs <- predict.test.build.samples.source("blogs", type, n.blogs,
+                                                           prefix.min.tokens = prefix.min.tokens,
+                                                           preprocess.suffix = preprocess.suffix)
+        samples.news <- predict.test.build.samples.source("news", type, n.news,
+                                                           prefix.min.tokens = prefix.min.tokens,
+                                                           preprocess.suffix = preprocess.suffix)
+        samples.twitter <- predict.test.build.samples.source("twitter", type, n.twitter,
+                                                           prefix.min.tokens = prefix.min.tokens,
+                                                           preprocess.suffix = preprocess.suffix)
+        samples <- rbind(samples.blogs, samples.news, samples.twitter)
+        
+        # Shuffle the samples.
+        sample_n(samples, nrow(samples))
+    } else {
+        predict.test.build.samples.source(source, type, n,
+                                          prefix.min.tokens = prefix.min.tokens,
+                                          preprocess.suffix = preprocess.suffix)
+    }
+}
+
 predict.test.cache.samples <- function(source, type, n, prefix.min.tokens = 5,
                                        preprocess.suffix = FALSE) {
     samples.file.name <- file.path("cache",
@@ -179,14 +216,11 @@ predict.test.cache.samples <- function(source, type, n, prefix.min.tokens = 5,
         message("Loading samples (", source, ", ", type, ") from ", samples.file.name)
         readRDS(samples.file.name)
     } else {
-        text <- predict.test.text.load(source, type)
-        samples <- predict.test.build.samples(text, n, prefix.min.tokens = prefix.min.tokens,
-                                              preprocess.suffix = preprocess.suffix) %>%
-            mutate(Source = source) %>%
-            mutate_if(is.factor, as.character)
+        samples <- predict.test.build.samples(source, type, n, prefix.min.tokens = prefix.min.tokens,
+                                              preprocess.suffix = preprocess.suffix)
         
-#        message("Saving samples (", source, ", ", type, ") into ", samples.file.name)
-#        saveRDS(samples, samples.file.name)
+        # message("Saving samples (", source, ", ", type, ") into ", samples.file.name)
+        # saveRDS(samples, samples.file.name)
         
         samples
     }
@@ -299,3 +333,4 @@ predict.test.sb.cache <- function(source, type, n.samples = 100,
         #    predicted
     }
 }
+    
