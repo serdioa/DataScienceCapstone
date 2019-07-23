@@ -283,18 +283,19 @@ predict.test.sb <- function(source, type, n.samples = 100,
 predict.test.sb.cache <- function(source, type, n.samples = 100,
                                   preprocess.suffix = FALSE,
                                   threshold = 5, removeStopwords = FALSE) {
+    threshold.collapsed <- paste0(threshold, collapse = "")
     file.name <- file.path("cache", paste0("predicted.", source, ".", type, ".", n.samples,
-                       ".prep-", preprocess.suffix, ".thr-", threshold,
+                       ".prep-", preprocess.suffix, ".thr-", threshold.collapsed,
                        ".remsw-", removeStopwords, ".RDS"))
     if (file.exists(file.name)) {
         message("Loading predicted results from ", file.name)
-        readRDS(file.name)
+        # readRDS(file.name)
     } else {
         message("Predicting results for ", file.name)
         predicted <- predict.test.sb(source, type, n.samples, preprocess.suffix,
                                      threshold, removeStopwords)
         message("Saving predicted results to ", file.name)
         saveRDS(predicted, file.name)
-        predicted
+        #    predicted
     }
 }
