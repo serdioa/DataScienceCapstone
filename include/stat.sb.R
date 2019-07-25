@@ -1,0 +1,309 @@
+#
+# Collect statistics about Stupid Backoff prediction algorithm.
+#
+
+library(dplyr)
+
+library(dplyr)
+
+source("include/predict.sb.R")
+source("include/predict.test.R")
+
+#
+# Collect size (rows and bytes) of non-optimized frequency table for n-grams.
+#
+stat.sb.table.enr.n <- function(n, removeStopwords = FALSE) {
+    # Load the original table.
+    table.orig <- table.enr.cache(n, removeStopwords)
+    
+    # To be fair, keep only the same columns as in the optimized data.
+    if (n == 1) {
+        table.norm <- data.frame(Suffix = table.orig$Suffix,
+                                 Prob = table.orig$SuffixProbLog)
+    } else {
+        table.norm <- data.frame(Prefix = table.orig$Prefix,
+                                 Suffix = table.orig$Suffix,
+                                 Prob = table.orig$SuffixProbLog)
+    }
+    
+    table.norm.nrow <- nrow(table.norm)
+    table.norm.size <- format(object.size(table.norm), units = "Mb")
+    
+    data.frame(N = n,
+               Rows = table.norm.nrow,
+               Size = table.norm.size)
+}
+
+#
+# Collect size (rows and bytes) of non-optimized frequency table for all n-grams.
+#
+stat.sb.table.enr <- function(removeStopwords = FALSE) {
+    rbind(stat.sb.table.enr.n(1, removeStopwords),
+          stat.sb.table.enr.n(2, removeStopwords),
+          stat.sb.table.enr.n(3, removeStopwords),
+          stat.sb.table.enr.n(4, removeStopwords),
+          stat.sb.table.enr.n(5, removeStopwords))
+}
+
+#
+# Cache size (rows and bytes) of non-optimized frequency table for all n-grams.
+#
+stat.sb.table.enr.cache <- function(removeStopwords = FALSE) {
+    var.name <- "stat.sb.enr"
+    var.build <- function() stat.sb.table.enr(removeStopwords)
+    
+    get.var.cache(var.name, var.build, removeStopwords)
+}
+
+#
+# Collect size (rows and bytes) of optimized frequency table for n-grams
+# with the specified filtering threshold (exclude rows with frequency equals
+# or below the threshold).
+#
+stat.sb.table.opt.n <- function(n, threshold = 5, removeStopwords = FALSE) {
+    table.orig <- table.optimize.sb.cache(n, threshold = threshold,
+                                          removeStopwords = removeStopwords)
+    
+    table.orig.nrow <- nrow(table.orig)
+    table.orig.size <- as.integer(object.size(table.orig))
+            
+    data.frame(N = n,
+               Threshold = threshold,
+               Rows = table.orig.nrow,
+               Size = table.orig.size)
+}
+
+#
+# Collect size (rows and bytes) of optimized frequency table for all n-grams
+# with the specified filtering threshold (exclude rows with frequency equals
+# or below the threshold).
+#
+stat.sb.table.opt <- function(threshold = 5, removeStopwords = FALSE) {
+    rbind(stat.sb.table.opt.n(1, threshold = threshold, removeStopwords = removeStopwords),
+          stat.sb.table.opt.n(2, threshold = threshold, removeStopwords = removeStopwords),
+          stat.sb.table.opt.n(3, threshold = threshold, removeStopwords = removeStopwords),
+          stat.sb.table.opt.n(4, threshold = threshold, removeStopwords = removeStopwords),
+          stat.sb.table.opt.n(5, threshold = threshold, removeStopwords = removeStopwords))
+}
+
+#
+# Cache size (rows and bytes) of optimized frequency table for all n-grams
+# with the specified filtering threshold (exclude rows with frequency equals
+# or below the threshold).
+#
+stat.sb.table.opt.cache <- function(threshold = 5, removeStopwords = FALSE) {
+    var.name <- paste0("stat.sb.opt.", threshold)
+    var.build <- function() stat.sb.table.opt(threshold, removeStopwords)
+    
+    get.var.cache(var.name, var.build, removeStopwords)
+}
+
+#
+# Calculates size (rows and bytes) of optimized frequency table for all n-grams
+# and all filtering thresholds.
+#
+stat.sb.table.opt.all <- function(removeStopwords = FALSE) {
+    sb.opt.0 <- stat.sb.table.opt.cache(threshold = 0, removeStopwords = removeStopwords)
+    sb.opt.1 <- stat.sb.table.opt.cache(threshold = 1, removeStopwords = removeStopwords)
+    sb.opt.2 <- stat.sb.table.opt.cache(threshold = 2, removeStopwords = removeStopwords)
+    sb.opt.3 <- stat.sb.table.opt.cache(threshold = 3, removeStopwords = removeStopwords)
+    sb.opt.4 <- stat.sb.table.opt.cache(threshold = 4, removeStopwords = removeStopwords)
+    sb.opt.5 <- stat.sb.table.opt.cache(threshold = 5, removeStopwords = removeStopwords)
+    
+    data.frame(N = sb.opt.0$N,
+               Rows.0 = sb.opt.0$Rows,
+               Size.0 = sb.opt.0$Size,
+               Rows.1 = sb.opt.1$Rows,
+               Size.1 = sb.opt.1$Size,
+               Rows.2 = sb.opt.2$Rows,
+               Size.2 = sb.opt.2$Size,
+               Rows.3 = sb.opt.3$Rows,
+               Size.3 = sb.opt.3$Size,
+               Rows.4 = sb.opt.4$Rows,
+               Size.4 = sb.opt.4$Size,
+               Rows.5 = sb.opt.5$Rows,
+               Size.5 = sb.opt.5$Size
+    )
+}
+
+#
+# Collects statistics of prediction.
+#
+stat.predict.sb.mono.collect.n <- function(source, type,
+                                           preprocess.suffix = FALSE,
+                                           threshold = 5, removeStopwords = FALSE) {
+    predict.tbl <- predict.test.sb.cache(source, type, n.samples = 100000,
+                                         preprocess.suffix = preprocess.suffix,
+                                         threshold = threshold, removeStopwords = removeStopwords)
+    
+    # Split on 100 blocks x 1000 samples.
+    # For each block calculate:
+    # * Number of samples where the right word was top 1st predicted.
+    # * Number of samples where the right word was in top 3 predicted.
+    # * Number of samples where the right word was in top 5 predicted.
+    stat.avg <- lapply(1:100, function(n) {
+        row.min <- (n - 1) * 1000 + 1
+        row.max <- n * 1000
+        
+        predict.tbl.n <- predict.tbl[row.min:row.max,]
+        predict.tbl.n.length <- nrow(predict.tbl.n)
+        
+        stat.1.avg <- predict.tbl.n %>% filter(Match.Index <= 1) %>% nrow() / predict.tbl.n.length
+        stat.3.avg <- predict.tbl.n %>% filter(Match.Index <= 3) %>% nrow() / predict.tbl.n.length
+        stat.5.avg <- predict.tbl.n %>% filter(Match.Index <= 5) %>% nrow() / predict.tbl.n.length
+        
+        c(stat.1.avg, stat.3.avg, stat.5.avg)
+    })
+    
+    # Extract number of samples for various levels of matches.
+    stat.avg.1 <- sapply(stat.avg, "[[", 1)
+    stat.avg.3 <- sapply(stat.avg, "[[", 2)
+    stat.avg.5 <- sapply(stat.avg, "[[", 3)
+    
+    # Combine the data into a data frame.
+    tbl.avg.1 <- data.frame(Source = rep(source, 100),
+                            Type = rep(type, 100),
+                            RemoveStopwords = rep(removeStopwords, 100),
+                            Threshold = rep(threshold, 100),
+                            Rank = rep(1, 100),
+                            Match = stat.avg.1)
+    tbl.avg.3 <- data.frame(Source = rep(source, 100),
+                            Type = rep(type, 100),
+                            RemoveStopwords = rep(removeStopwords, 100),
+                            Threshold = rep(threshold, 100),
+                            Rank = rep(3, 100),
+                            Match = stat.avg.3)
+    tbl.avg.5 <- data.frame(Source = rep(source, 100),
+                            Type = rep(type, 100),
+                            RemoveStopwords = rep(removeStopwords, 100),
+                            Threshold = rep(threshold, 100),
+                            Rank = rep(5, 100),
+                            Match = stat.avg.5)
+    
+    rbind(tbl.avg.1, tbl.avg.3, tbl.avg.5)
+}
+
+stat.predict.sb.mono.collect <- function(source, type,
+                                         preprocess.suffix = FALSE,
+                                         removeStopwords = FALSE) {
+    stat.0 <- stat.predict.sb.mono.collect.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 0, removeStopwords = removeStopwords)
+    stat.1 <- stat.predict.sb.mono.collect.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 1, removeStopwords = removeStopwords)
+    stat.2 <- stat.predict.sb.mono.collect.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 2, removeStopwords = removeStopwords)
+    stat.3 <- stat.predict.sb.mono.collect.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 3, removeStopwords = removeStopwords)
+    stat.4 <- stat.predict.sb.mono.collect.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 4, removeStopwords = removeStopwords)
+    stat.5 <- stat.predict.sb.mono.collect.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 5, removeStopwords = removeStopwords)
+    
+    rbind(stat.0, stat.1, stat.2, stat.3, stat.4, stat.5)
+}
+
+stat.predict.sb.mono.collect.all <- function() {
+    blogs.sw <- stat.predict.sb.mono.collect("blogs", "testing", removeStopwords = FALSE)
+    news.sw <- stat.predict.sb.mono.collect("news", "testing", removeStopwords = FALSE)
+    twitter.sw <- stat.predict.sb.mono.collect("twitter", "testing", removeStopwords = FALSE)
+    
+    blogs.nosw <- stat.predict.sb.mono.collect("blogs", "testing", removeStopwords = TRUE)
+    news.nosw <- stat.predict.sb.mono.collect("news", "testing", removeStopwords = TRUE)
+    twitter.nosw <- stat.predict.sb.mono.collect("twitter", "testing", removeStopwords = TRUE)
+    
+    rbind(blogs.sw, news.sw, twitter.sw, blogs.nosw, news.nosw, twitter.nosw)
+}
+
+#
+# Calculates precision of prediction (average and confidence interval) for
+# samples with a monomodal threshold (the same threshold for all n-grams).
+#
+stat.predict.sb.mono.n <- function(source, type,
+                                   preprocess.suffix = FALSE,
+                                   threshold = 5, removeStopwords = FALSE) {
+    predict.tbl <- predict.test.sb.cache(source, type, n.samples = 100000,
+                                         preprocess.suffix = preprocess.suffix,
+                                         threshold = threshold, removeStopwords = removeStopwords)
+    
+    # Split on 100 blocks x 1000 samples.
+    # For each block calculate:
+    # * Number of samples where the right word was top 1st predicted.
+    # * Number of samples where the right word was in top 3 predicted.
+    # * Number of samples where the right word was in top 5 predicted.
+    stat.avg <- lapply(1:100, function(n) {
+        row.min <- (n - 1) * 1000 + 1
+        row.max <- n * 1000
+        
+        predict.tbl.n <- predict.tbl[row.min:row.max,]
+        predict.tbl.n.length <- nrow(predict.tbl.n)
+
+        stat.1.avg <- predict.tbl.n %>% filter(Match.Index <= 1) %>% nrow() / predict.tbl.n.length
+        stat.3.avg <- predict.tbl.n %>% filter(Match.Index <= 3) %>% nrow() / predict.tbl.n.length
+        stat.5.avg <- predict.tbl.n %>% filter(Match.Index <= 5) %>% nrow() / predict.tbl.n.length
+        
+        c(stat.1.avg, stat.3.avg, stat.5.avg)
+    })
+    
+    # Extract number of samples for various levels of matches.
+    stat.avg.1 <- sapply(stat.avg, "[[", 1)
+    stat.avg.3 <- sapply(stat.avg, "[[", 2)
+    stat.avg.5 <- sapply(stat.avg, "[[", 3)
+
+    # Calculate an average and confidence interval.
+    stat.avg.1.t <- t.test(stat.avg.1)
+    stat.avg.3.t <- t.test(stat.avg.3)
+    stat.avg.5.t <- t.test(stat.avg.5)
+    
+    # Combine into a data frame.
+    data.frame(Source = rep(source, 3),
+               Type = rep(type, 3),
+               RemoveStopwords = rep(removeStopwords, 3),
+               Threshold = rep(threshold, 3),
+               Rank = c(1, 3, 5),
+               Mean = c(stat.avg.1.t$estimate, stat.avg.3.t$estimate, stat.avg.5.t$estimate),
+               ConfIntLow = c(stat.avg.1.t$conf[1], stat.avg.3.t$conf[1], stat.avg.5.t$conf[1]),
+               ConfIntHigh = c(stat.avg.1.t$conf[2], stat.avg.3.t$conf[2], stat.avg.5.t$conf[2]))
+}
+
+#
+# Calculates precision of prediction (average and confidence interval) for
+# samples with all monomodal thresholds (the same threshold for all n-grams).
+#
+stat.predict.sb.mono <- function(source, type,
+                                 preprocess.suffix = FALSE,
+                                 removeStopwords = FALSE) {
+    stat.0 <- stat.predict.sb.mono.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 0, removeStopwords = removeStopwords)
+    stat.1 <- stat.predict.sb.mono.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 1, removeStopwords = removeStopwords)
+    stat.2 <- stat.predict.sb.mono.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 2, removeStopwords = removeStopwords)
+    stat.3 <- stat.predict.sb.mono.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 3, removeStopwords = removeStopwords)
+    stat.4 <- stat.predict.sb.mono.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 4, removeStopwords = removeStopwords)
+    stat.5 <- stat.predict.sb.mono.n(source, type, preprocess.suffix = preprocess.suffix,
+                                     threshold = 5, removeStopwords = removeStopwords)
+    
+    rbind(stat.0, stat.1, stat.2, stat.3, stat.4, stat.5)
+}
+
+#
+# Calculates precision of prediction (average and confidence interval) for
+# all monomodal samples, including with and without stopwords.
+#
+stat.predict.sb.mono.all <- function() {
+    blogs.sw <- stat.predict.sb.mono("blogs", "testing", removeStopwords = FALSE)
+    news.sw <- stat.predict.sb.mono("news", "testing", removeStopwords = FALSE)
+    twitter.sw <- stat.predict.sb.mono("twitter", "testing", removeStopwords = FALSE)
+    
+    blogs.nosw <- stat.predict.sb.mono("blogs", "testing", removeStopwords = TRUE)
+    news.nosw <- stat.predict.sb.mono("news", "testing", removeStopwords = TRUE)
+    twitter.nosw <- stat.predict.sb.mono("twitter", "testing", removeStopwords = TRUE)
+    
+    rbind(blogs.sw, news.sw, twitter.sw, blogs.nosw, news.nosw, twitter.nosw)
+}
+
+# source("include/stat.sb.R")
+# predict.0 <- stat.predict.sb.mono.n("blogs", "testing", threshold = 0, removeStopwords = FALSE)
+# predict.0 <- stat.predict.sb.mono("blogs", "testing", removeStopwords = FALSE)
