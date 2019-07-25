@@ -4,6 +4,7 @@
 # if (!exists('prepare.sb')) {
     prepare.sb <- TRUE
 
+    library(hunspell)
     source("include/prepare.sb.R")
     
     # Transorms the probability from the filtered table from log to standard.
@@ -143,7 +144,7 @@
     # 
     # prefix - character vector with tokens.
     # n - number of candidates to return.
-    sb.predict <- function(prefix, n = 5, threshold = 5, removeStopwords = FALSE) {
+    sb.predict <- function(prefix, word.pattern = NULL, n = 5, threshold = 5, removeStopwords = FALSE) {
         # Make the threshold the right length.
         threshold <- rep(threshold, length.out = 5)
         
@@ -177,6 +178,10 @@
                                                          threshold = threshold[i + 1],
                                                          removeStopwords = removeStopwords)
                 table.candidates.n <- table.ngram.n[.(prefix.n.code), nomatch = NULL][!(Suffix %in% candidates$Suffix)]
+                if (!is.null(word.pattern)) {
+                    table.candidates.n <- table.candidates.n %>%
+                        filter(grepl(word.pattern, Suffix))
+                }
 
                 if (nrow(table.candidates.n) > 0) {
                     table.candidates.n <- table.candidates.n %>%
@@ -198,7 +203,12 @@
             table.ngram.1 <- table.optimize.sb.cache(1, threshold = threshold[1],
                                                      removeStopwords = removeStopwords)
             table.candidates.1 <- table.ngram.1 %>%
-                filter(!(Suffix %in% candidates$Suffix)) %>%
+                filter(!(Suffix %in% candidates$Suffix))
+            if (!is.null(word.pattern)) {
+                table.candidates.1 <- table.candidates.1 %>%
+                    filter(grepl(word.pattern, Suffix))
+            }
+            table.candidates.1 <- table.candidates.1 %>%
                 transmute(Prefix = "",
                           Suffix = Suffix,
                           N = 0,
@@ -209,15 +219,44 @@
             candidates <- rbind(candidates, table.candidates.1)
         }
         
+        if (nrow(candidates) == 0 && !is.na(word.pattern)) {
+            word.pattern.clean <- gsub("[^a-zA-Z]", "", word.pattern)
+            suggestions <- hunspell_suggest(word.pattern.clean)
+            suggestions.length <- length(suggestions[[1]])
+            if (suggestions.length >= 1) {
+                candidates <- data.frame(Prefix = "",
+                                         Suffix = suggestions[[1]],
+                                         N = 0,
+                                         SuffixProb = 0,
+                                         Score = 1e-10 * (suggestions.length : 1))
+            }
+        }
+        
         candidates %>%
             arrange(desc(Score)) %>%
             head(n) %>%
             mutate_if(is.factor, as.character)
     }
     
-    sb.predict.text <- function(text, n = 5, threshold = 5, removeStopwords = FALSE) {
+    sb.predict.text <- function(text, predict.partial = FALSE, n = 5, threshold = 5, removeStopwords = FALSE) {
+        use.pattern <- predict.partial && !(substring(text, nchar(text)) %in% c("", " "))
+        
+        word.pattern <- NULL
+        if (use.pattern) {
+            # Split the last word.
+            splitted <- strsplit(text, "\\s+(?=[^\\s]+$)", perl = TRUE)
+            splitted.length = length(splitted[[1]])
+            if (splitted.length > 1) {
+                text <- splitted[[1]][1]
+                word.pattern <- paste0("^", splitted[[1]][2])
+            } else if (splitted.length == 1) {
+                text <- ""
+                word.pattern <- paste0("^", splitted[[1]][1])
+            }
+        }
+        
         prefix.tokens <- preprocess.text(text, removeStopwords = removeStopwords)
-        sb.predict(prefix.tokens, n = n, threshold = threshold, removeStopwords = removeStopwords)
+        sb.predict(prefix.tokens, word.pattern = word.pattern, n = n, threshold = threshold, removeStopwords = removeStopwords)
     }
     
     test.sample <- list(
