@@ -3,8 +3,7 @@
 #
 
 library(dplyr)
-
-library(dplyr)
+library(ggplot2)
 
 source("include/predict.sb.R")
 source("include/predict.test.R")
@@ -304,6 +303,29 @@ stat.predict.sb.mono.all <- function() {
     rbind(blogs.sw, news.sw, twitter.sw, blogs.nosw, news.nosw, twitter.nosw)
 }
 
-# source("include/stat.sb.R")
-# predict.0 <- stat.predict.sb.mono.n("blogs", "testing", threshold = 0, removeStopwords = FALSE)
-# predict.0 <- stat.predict.sb.mono("blogs", "testing", removeStopwords = FALSE)
+#
+# Collect statistics of validation.
+#
+stat.predict.sb.validation.all <- function() {
+    validation.blogs <- stat.predict.sb.mono.collect.n("blogs", "validation")
+    validation.news <- stat.predict.sb.mono.collect.n("news", "validation")
+    validation.twitter <- stat.predict.sb.mono.collect.n("twitter", "validation")
+    validation.all <- stat.predict.sb.mono.collect.n("all", "validation")
+    
+    rbind(validation.blogs, validation.news, validation.twitter, validation.all)
+}
+
+stat.predict.sb.validation.all.chart <- function() {
+    if (!exists("stat.validation")) {
+        stat.validation <- stat.predict.sb.validation.all()
+    }
+    
+    ggplot(data = stat.validation, aes(x = as.factor(Rank), y = Match * 100, fill = Source)) +
+        geom_boxplot() +
+        scale_fill_discrete(name = "Source",
+                            labels = c("Blogs", "News", "Twitter", "Aggregated")) +
+        labs(title = "Prediction precision") +
+        labs(x = "Top N predictions") +
+        labs(y = "Correct prediction in top N, %") + 
+        theme_bw(base_size = 14)
+}
