@@ -8,11 +8,11 @@
 #
 
 library(shiny)
-source("preprocess.R")
-source("predict.common.R")
-source("ngram.encode.R")
-source("prepare.sb.R")
-source("predict.sb.R")
+library(dplyr)
+library(fastmatch)
+library(hunspell)
+library(stringr)
+library(tokenizers)
 
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {
@@ -55,6 +55,320 @@ shinyServer(function(input, output, session) {
                             text = round(score, 4),
                             showarrow = FALSE)
     })
+    
+    ############################################################################
+    #
+    # Predict the next word with Stupid Backoff algorithm.
+    #
+    ############################################################################
+
+    # Predict the next word that follows the specified text.
+    # 
+    # @param text - the prefix text.
+    # @param predict.partial - if TRUE, attempt to predict complete word
+    #       based on the last partial word.
+    # @param n - the number of candidates to predict.
+    sb.predict.text <- function(text, predict.partial = FALSE, n = 5) {
+        use.pattern <- predict.partial && !(substring(text, nchar(text)) %in% c("", " "))
+        
+        word.pattern <- NULL
+        if (use.pattern) {
+            # Split the last word.
+            splitted <- strsplit(text, "\\s+(?=[^\\s]+$)", perl = TRUE)
+            splitted.length = length(splitted[[1]])
+            if (splitted.length > 1) {
+                text <- splitted[[1]][1]
+                word.pattern <- paste0("^", splitted[[1]][2])
+            } else if (splitted.length == 1) {
+                text <- ""
+                word.pattern <- paste0("^", splitted[[1]][1])
+            }
+        }
+        
+        prefix.tokens <- preprocess.text(text)
+        sb.predict(prefix.tokens, word.pattern, n)
+    }
+    
+    # Predicts the next word following the specified tokens.
+    # 
+    # @param prefix - character vector with tokens.
+    # @param n - number of candidates to return.
+    sb.predict <- function(prefix, word.pattern = NULL, n = 5) {
+        prefix.length <- length(prefix)
+
+        # Create a table to hold results.
+        candidates <- data.frame(Prefix = character(),
+                                 Suffix = character(),
+                                 N = integer(),
+                                 SuffixProb = numeric(),
+                                 Score = numeric())
+        
+        # Choose candidates from 5- to 2-grms.
+        # 1-grams (context-free prediction which completely ignores the prefix)
+        # are used only as the last resort if not enough candidates are found.
+        for (i in 4:1) {
+            if (prefix.length >= i) {
+                # Choose the right encoding function.
+                tokens.encode <- tokens.encode.n(i)
+                
+                # Encode the (i-1) part of the prefix.
+                prefix.n <- tail(prefix, i)
+                prefix.n.code <- tokens.encode(prefix.n, dict.hash)
+                
+                # Choose candidates starting with our prefix from optimized
+                # table with n-grams.
+                table.ngram.n <- ngram.n(i + 1)
+                table.candidates.n <- table.ngram.n[.(prefix.n.code), nomatch = NULL][!(Suffix %in% candidates$Suffix)]
+                if (!is.null(word.pattern)) {
+                    table.candidates.n <- table.candidates.n %>%
+                        filter(grepl(word.pattern, Suffix))
+                }
+                
+                if (nrow(table.candidates.n) > 0) {
+                    table.candidates.n <- table.candidates.n %>%
+                        transmute(Prefix = paste0(prefix.n, collapse = " "),
+                                  Suffix = Suffix,
+                                  N = i,
+                                  SuffixProb = Prob,
+                                  Score = exp(Prob / 1000000 + log(0.4) * (min(4, prefix.length) - i)))
+                    
+                    candidates <- rbind(candidates, table.candidates.n)
+                }
+            }
+        }
+        
+        # If we still have not enough candidates, choose from 1-grams
+        # context-free, that is without taking the prefix in the consideration.
+        candidates.found <- nrow(candidates)
+        if (candidates.found < n) {
+            table.candidates.1 <- ngram.1 %>%
+                filter(!(Suffix %in% candidates$Suffix))
+            if (!is.null(word.pattern)) {
+                table.candidates.1 <- table.candidates.1 %>%
+                    filter(grepl(word.pattern, Suffix))
+            }
+            table.candidates.1 <- table.candidates.1 %>%
+                transmute(Prefix = "",
+                          Suffix = Suffix,
+                          N = 0,
+                          SuffixProb = Prob,
+                          Score = exp(Prob / 1000000 + 4 * log(0.4))) %>%
+                head(n - candidates.found)
+            
+            candidates <- rbind(candidates, table.candidates.1)
+        }
+        
+        if (nrow(candidates) == 0 && !is.na(word.pattern)) {
+            word.pattern.clean <- gsub("[^a-zA-Z]", "", word.pattern)
+            suggestions <- hunspell_suggest(word.pattern.clean)
+            suggestions.length <- length(suggestions[[1]])
+            if (suggestions.length >= 1) {
+                candidates <- data.frame(Prefix = "",
+                                         Suffix = suggestions[[1]],
+                                         N = 0,
+                                         SuffixProb = 0,
+                                         Score = 1e-10 * (suggestions.length : 1))
+            }
+        }
+        
+        candidates %>%
+            arrange(desc(Score)) %>%
+            head(n) %>%
+            mutate_if(is.factor, as.character)
+    }
+    
+    ############################################################################
+    #
+    # Preprocess the text: remove punctuation, digits etc, and split on tokens.
+    #
+    ############################################################################
+    
+    # Pre-process text before predicting next word based on the text.
+    # Returns character vector with words.
+    preprocess.text <- function(data.text) {
+        # Split the text on sentences and keep only the last one.
+        data.sentences <- unlist(tokenizers::tokenize_sentences(data.text))
+        data.sentences.length <- length(data.sentences)
+        if (data.sentences.length < 1) {
+            return (NA)
+        }
+        text <- data.sentences[data.sentences.length]
+
+        # Preprocess the text.
+        text <- preprocess.removeUrl(text)
+        text <- preprocess.removeEmail(text)
+        text <- preprocess.removeTagsAndHandles(text)
+        text <- preprocess.removeUnderscores(text)
+        text <- preprocess.addMissingSpace(text)
+        
+        tokens <- preprocess.tokenize(text)
+        tokens <- preprocess.replaceWords(tokens)
+        tokens <- preprocess.removeNonEnglish(tokens)
+        tokens <- preprocess.stem.word(tokens)
+        tokens <- preprocess.addSentenceTokens(tokens)
+
+        tokens
+    }
+    
+    # Remove URLs. The regular expression detects http(s) and ftp(s) protocols.
+    preprocess.removeUrl <- function(x) gsub("(ht|f)tp(s?)://\\S+", "", x)
+    
+    # Remove e-mail addresses.
+    # The regular expression from Stack Overflow:
+    # https://stackoverflow.com/questions/201323/how-to-validate-an-email-address-using-a-regular-expression
+    preprocess.removeEmail <- function(x) gsub("(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])", "", x, perl = TRUE)
+    
+    # Remove hash tags (the character # and the following word) and twitter handles
+    # (the character @ and the following word).
+    preprocess.removeTagsAndHandles <- function(x) gsub("[@#]\\S+", "", x)
+    
+    # Remove all underscore characters ("_").
+    # There are different occurence or underscore in the corpora.
+    # Sometimes several underscores are used to indicate a place to insert
+    # a word. Sometimes underscores are used as an emphasis. Finally, sometimes
+    # underscores are used to hide profanity.
+    # We replace underscores with space characters to keep words separated
+    # in case when underscores were used as separators.
+    preprocess.removeUnderscores <- function(x) gsub("_", " ", x)
+    
+    # Surround punctuation marks which does not appear inside a word with space
+    # characters. Without this step, fragments with a missing space are
+    # transformed to a single non-existing word when punctuation is removed.
+    # Example: corpus contains
+    # "I had the best day yesterday,it was like two kids in a candy store"
+    # Without this step, "yesterday,it" is transformed to a non-existing word
+    # "yesterdayit" when removing punctuation. This step transforms it to
+    # "yesterday, it"
+    preprocess.addMissingSpace <- function(x) gsub("[,.!?()\":;”…]", " ", x)
+    
+    # Split text on words. Keep the words uppercase.
+    preprocess.tokenize <- function(text) {
+        tokenizers::tokenize_words(text,
+                                   lowercase = FALSE,
+                                   simplify = TRUE,
+                                   strip_numeric = TRUE)
+    }
+    
+    preprocess.replaceWords <- function(tokens) {
+        # Replace character often used in the sample text instead of the
+        # upper single quote in abbreviations.
+        tokens <- gsub("’", "'", tokens)
+        tokens <- gsub("\u0092", "'", tokens)
+        
+        # Attempt to replace each word.
+        tokens <- sapply(tokens, function(x) {
+            # Search if a replacement exist.
+            replacement.index <- fmatch(x, replacements.tokens.token)
+            replacement.index.tolower <- fmatch(tolower(x), replacements.tokens.token)
+            
+            ifelse(!is.na(replacement.index),
+                   # Replace the token.
+                   replacements.tokens$replacement[replacement.index],
+                   # Can't find a replacement, try lowercase.
+                   ifelse(!is.na(replacement.index.tolower),
+                          # Found a replacement with lowercase. replace the token,
+                          # changing the first letter to uppercase.
+                          str_to_sentence(replacements.tokens$replacement[replacement.index.tolower]),
+                          # Still can't find a replacement, fall back on the token.
+                          x
+                   )
+            )
+        }, USE.NAMES = FALSE)
+        
+        tokens <- unlist(preprocess.tokenize(tokens))
+    }
+    
+    # Keep the word, if it is included in the table with top stems.
+    # Otherwise, replaces the word with the specified token.
+    preprocess.top.stem.keep <- function(stem) {
+        ifelse(is.na(fmatch(stem, stems.freq.top)), "UNK", stem)
+    }
+    
+    # Stem the specified token, transform it to the lower case, and
+    # replace with the UNK token if it is not in the list of top stems.
+    preprocess.stem.word <- function(x) {
+        ifelse(x == "STOS", x,
+               preprocess.top.stem.keep(SnowballC::wordStem(tolower(x), language = "en")))
+    }
+
+    preprocess.removeNonEnglish <- function(tokens) {
+        # Valid characters:
+        # * A-Z, a-z
+        # * Extended Latin (accented): \u00c0 - \u00ff
+        # * Upper single quote
+        tokens.valid <- grepl("^[A-Za-z'\u00c0-\u00ff]+$", tokens)
+        tokens[tokens.valid]
+    }
+    
+    # Add tokens representing start of a sentence.
+    # STOS = Start Of Sentence.
+    preprocess.addSentenceTokens <- function(tokens) c("STOS", tokens)
+    
+    ############################################################################
+    #
+    # Encoding of tokens to binary.
+    #
+    ############################################################################
+    
+    # Transofrm an integer (0 : 256*256-1) to raw.
+    int2raw <- function(value) {
+        low = value %% 256
+        high = value %/% 256
+        as.raw(c(high, low))
+    }    
+    
+    tokens.encode.1 <- function(tokens, dict.hash) {
+        # Encoding a single token: just return a code from the table.
+        dict.hash[[tokens[1]]]
+    }
+    
+    tokens.encode.2 <- function(tokens, dict.hash) {
+        # Encoding 2 tokens: combine raw codes and transform them to a single
+        # integer code (4 bytes).
+        code.raw <- c(int2raw(dict.hash[[tokens[1]]]),
+                      int2raw(dict.hash[[tokens[2]]]))
+        
+        readBin(code.raw, what = "integer")
+    }
+    
+    tokens.encode.3 <- function(tokens, dict.hash) {
+        # Encoding 3 tokens: combine raw codes and transform them to a single
+        # numeric code (8 bytes). Actually we require just 6 bytes, but there
+        # is no 6-byte data type in R.
+        code.raw <- as.raw(c(int2raw(dict.hash[[tokens[1]]]),
+                             int2raw(dict.hash[[tokens[2]]]),
+                             int2raw(dict.hash[[tokens[3]]]),
+                             0x0, 0x0))
+        readBin(code.raw, what = "numeric")
+    }
+    
+    tokens.encode.4 <- function(tokens, dict.hash) {
+        # Encoding 4 tokens: combine raw codes and transform them to a single
+        # numeric code (8 bytes).
+        code.raw <- c(int2raw(dict.hash[[tokens[1]]]),
+                      int2raw(dict.hash[[tokens[2]]]),
+                      int2raw(dict.hash[[tokens[3]]]),
+                      int2raw(dict.hash[[tokens[4]]]))
+        readBin(code.raw, what = "numeric")
+    }
+    
+    tokens.encode.n <- function(n) {
+        if (n == 1) {
+            tokens.encode.1
+        } else if (n == 2) {
+            tokens.encode.2
+        } else if (n == 3) {
+            tokens.encode.3
+        } else if (n == 4) {
+            tokens.encode.4
+        }
+    }
+    
+    ############################################################################
+    #
+    # Sample sentences.
+    #
+    ############################################################################
     
     test.sample <- list(
         "No fatigue, or feeling ",
