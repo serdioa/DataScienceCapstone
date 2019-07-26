@@ -139,6 +139,13 @@ memory usage is significantly reduced once more. For example, for 5-grams
 but only 3.7 MB if excluding all 5-grams which appear 5 times or less, reducing
 memory usage by further 99.5%.
 
+* Empyrical conditional probabilities in n-gram tables are naturally represented
+by R "numeric" type which requires 8 bytes. We may reduce the storage by half
+without loosing much precision by applying a scaled-Log transformation: 
+instead of storing probability *P*, we store the value *int(log(P) * 1000000)*.
+The R type "integer" require only 4 bytes, and we are storing logarithm with
+6 digits after the decimal point (transformed to an integer).
+
 By using all optimization techniques mentioned above, we were able to reduce
 the memory required to keep n-gram tables to 53.5 MB. The average time required
 to predict 10 top-ranking candidates was under 20 ms on our hardware.
