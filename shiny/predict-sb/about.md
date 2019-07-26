@@ -13,7 +13,8 @@ output:
 * [Model](#model)
 * [Implementation](#implementation)
 * [Optimization](#optimization)
-* [Extensions](#Extensions)
+* [Extensions](#extensions)
+* [Testing](#testing)
 * [Application](#application)
 * [References](#references)
 
@@ -115,7 +116,7 @@ Words not included in the top list are replaced with a special token UNK
 ("Unknown") when appear in n-gram prefixes. This optimization applies only to
 prefixes, the last word of each n-gram remains "as is".
 
-* Using 2^16-2 stems allows us to encode each stem, as well as 2 special tokens,
+* Using 2^16 - 2 stems allows us to encode each stem, as well as 2 special tokens,
 using 2 bytes. One of the special tokens is mentioned above UNK token, another
 is the STOS ("Start-Of-Sentence") token.
 
@@ -173,11 +174,105 @@ the next word using the partialy entered word by applying a spelling correction
 algorithm provided by the R package "hunspell". For example, if the user enters
 a misspelled word "mashine", we propose the spell-corrected word "machine".
 
+# <a name="testing"></a>Testing
+
+As you may remember from the [Implementation](#implementation), we have
+preserved 20% of the data for an off-sample validation test. The test was done
+as follows:
+
+* Choose 100.000 random sample sentences from each source (blogs, news, Twitter).
+Split each selection on 100 samples, each of 1000 sentences.
+
+* Create an aggregated test set of 100.000 sentences by choosing 1/3 of
+sentences from each source.
+
+* Choose a random word in a sentence, but not the very first word. Use the part
+of the sentence before the selected word as a prefix, and attempt to predict
+the selected word.
+
+* Run the prediction algorithm for all samples, predicting top 5 candidates.
+
+* For each batch of 1000 sentences, calculate percentage of cases when the
+word actually present in the sentence was in top 1, top 3 or top 5 of predicted
+candidates.
+
+The chart below shows results of the test run. For example, for blogs our
+algorithm correctly predicted the next word in 15.43% of cases, the correct
+result was in top 3 predictions in 25.51% of the cases, and in top 5 in 30.55%
+of the cases.
+
+![](validation.png)
+
+The following table shows the mean quality of our prediction algorithm (in which
+percentage of cases the right word was in top 1, top 3 and top 5), as well
+as 95% confidential interval.
+
+<table class="table table-condensed">
+    <thead>
+        <tr class="header">
+            <th rowspan="2">Source</th>
+            <th colspan="2" align="center">Word correctly predicted</th>
+            <th colspan="2" align="center">Word in Top 3</th>
+            <th colspan="2" align="center">Word in Top 5</th>
+        </tr>
+        <tr class="header">
+            <th align="right">Mean, %</th>
+            <th align="right">Conf. Int. 95%</th>
+            <th align="right">Mean, %</th>
+            <th align="right">Conf. Int. 95%</th>
+            <th align="right">Mean, %</th>
+            <th align="right">Conf. Int. 95%</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr class="odd">
+            <td>Blogs</td>
+            <td align="right">15.43</td>
+            <td align="right">(15.19, 15.66)</td>
+            <td align="right">25.51</td>
+            <td align="right">(25.21, 25.82)</td>
+            <td align="right">30.55</td>
+            <td align="right">(30.24, 30.85)</td>
+        </tr>
+        <tr class="even">
+            <td>News</td>
+            <td align="right">16.12</td>
+            <td align="right">(15.87, 16.36)</td>
+            <td align="right">25.71</td>
+            <td align="right">(25.44, 25.97)</td>
+            <td align="right">30.24</td>
+            <td align="right">(29.96, 30.51)</td>
+        </tr>
+        <tr class="odd">
+            <td>Twitter</td>
+            <td align="right">14.78</td>
+            <td align="right">(14.56, 15.00)</td>
+            <td align="right">24.20</td>
+            <td align="right">(23.97, 24.44)</td>
+            <td align="right">29.09</td>
+            <td align="right">(28.84, 29.35)</td>
+        </tr>
+        <tr class="even">
+            <td>Aggregated</td>
+            <td align="right">15.39</td>
+            <td align="right">(15.14, 15.65)</td>
+            <td align="right">25.04</td>
+            <td align="right">(24.78, 25.30)</td>
+            <td align="right">29.87</td>
+            <td align="right">(29.59, 30.15)</td>
+        </tr>
+    </tbody>
+</table>
+
+As the table demonstrates, our predictions are less precise for Twitter,
+more precise for blogs and news. This is to be expected: Twitter is the least
+formal of the sources, where people often prefer brevity to correctness.
+
 # <a name="application"></a>Application
 
 The application GUI provides the following elements:
 
-* Text area. Start entering the text there, and predicted words will appear
+* Text area: start entering the text there, and predicted words will appear
 on the chart below. The chart shows all words ordered by rank, providing a
 visual clue on how probable each candidate is. When "Predict partially entered
 words" is activated, **you have to type the space character to predict the next
