@@ -1,0 +1,162 @@
+---
+title: "Next Word Prediction: Stupid Backoff"
+author: "Alexey Serdyuk"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Content
+
+* [Synopsis](#synopsis)
+* [Downloading and splitting the corpus](#download_and_split)
+* [References](#references)
+
+# <a name="synopsis"></a>Synopsis
+
+This document provides the background and describes the approach used to
+implement the application "Next Word Prediction: Stupid Backoff".
+
+The application was developed as a capstone project for the for the cycle of courses
+[Data Science Specialization](https://www.coursera.org/specializations/jhu-data-science)
+offered on [Coursera](https://www.coursera.org) by
+[Johns Hopkins University](https://www.jhu.edu).
+
+The purpose of the capstone project is to build a Natural Language Processing
+(NLP) application that, given a chunk of text, predicts the next most probable
+word. The application may be used, for example, in mobile devices to provide
+suggestions as the user tips in some text, or as a part of a spelling correction
+module in a text editor.
+
+The application is available online: https://serdioa.shinyapps.io/sb-predict.
+
+# <a name="download_and_split"></a>Downloading and splitting the corpus
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(kableExtra)
+```
+
+Before we start discussing the application, there is a short general
+consideration. We decided to not include R script sources as the part of this
+document, but to keep them in separate script files which we reference.
+Moreover, many steps done when preparing the data and tuning meta-parameters
+require many hours to run. It would be impossible to re-run all steps each time
+when we re-render this document. R Markdown provides some possibilities to cache
+intermediate results, but they are not adequate to our task, since we were not
+able to keep in memory all intermediate results at once. Hence our approach was
+to process the data piecewise, explicitly caching intermediate results.
+
+Coursera provides a training text corpora HC Corpora [(1)](#hc_corpora). The
+corpora contains texts in several languages collected from various sources in
+Web, including blogs, news web sites and Twitter. The English corpora consists
+of approximately 4.2 millions lines of text.
+
+We start by downloading and unzipping the text corpora. The downloaded data is
+stored in the directory "cache".
+
+```{r eval=FALSE}
+source("include/download.R")
+download.data()
+```
+
+The downloaded zip file contains corpora in several languages: English, German,
+Russian and Finnish. In our project we will use only English corpora.
+
+Corpora in each language, including English, contains 3 files with content
+obtained from different sources: news, blogs and twitter.
+
+As the first step, we split each file from the English corpora on 3 parts:
+
+* Training set (60%) will be used to build and train the algorithm.
+* Testing set (20%) will be used to test the algorithm during it's development
+and tune meta-parameters. This set may be used more than once.
+* Validation set (20%) will be used for a final validation and estimation
+of out-of-sample performance. This set will be used only once.
+
+```{r eval=FALSE}
+source("include/split.R")
+split.all()
+```
+
+As a sanity check, we count a number of lines in each source file, as well in
+the partial files produced by the split.
+
+```{r countLines, echo=FALSE, message=FALSE, cache=TRUE}
+count.blogs <- R.utils::countLines(file.path("cache", "final", "en_US", "en_US.blogs.txt"))
+count.blogs.training <- R.utils::countLines(file.path("cache", "en_US.blogs.training.txt"))
+count.blogs.testing <- R.utils::countLines(file.path("cache", "en_US.blogs.testing.txt"))
+count.blogs.validation <- R.utils::countLines(file.path("cache", "en_US.blogs.validation.txt"))
+
+count.news <- R.utils::countLines(file.path("cache", "final", "en_US", "en_US.news.txt"))
+count.news.training <- R.utils::countLines(file.path("cache", "en_US.news.training.txt"))
+count.news.testing <- R.utils::countLines(file.path("cache", "en_US.news.testing.txt"))
+count.news.validation <- R.utils::countLines(file.path("cache", "en_US.news.validation.txt"))
+
+count.twitter <- R.utils::countLines(file.path("cache", "final", "en_US", "en_US.twitter.txt"))
+count.twitter.training <- R.utils::countLines(file.path("cache", "en_US.twitter.training.txt"))
+count.twitter.testing <- R.utils::countLines(file.path("cache", "en_US.twitter.testing.txt"))
+count.twitter.validation <- R.utils::countLines(file.path("cache", "en_US.twitter.validation.txt"))
+
+corpora.count <- data.frame(
+  "blogs" = c(count.blogs.training,
+              count.blogs.testing,
+              count.blogs.validation,
+              count.blogs,
+              count.blogs - (count.blogs.training +
+                             count.blogs.testing +
+                             count.blogs.validation)),
+  "blogs.pct" = c(count.blogs.training / count.blogs * 100,
+                  count.blogs.testing / count.blogs * 100,
+                  count.blogs.validation / count.blogs * 100,
+                  count.blogs / count.blogs * 100,
+                  NA),
+  "news" = c(count.news.training,
+             count.news.testing,
+             count.news.validation,
+             count.news,
+             count.news - (count.news.training +
+                           count.news.testing +
+                           count.news.validation)),
+  "news.pct" = c(count.news.training / count.news * 100,
+                 count.news.testing / count.news * 100,
+                 count.news.validation / count.news * 100,
+                 count.news / count.news * 100,
+                 NA),
+  "twitter" = c(count.twitter.training,
+                count.twitter.testing,
+                count.twitter.validation,
+                count.twitter,
+                count.twitter - (count.twitter.training +
+                                 count.twitter.testing +
+                                 count.twitter.validation)),
+  "twitter.pct" = c(count.twitter.training / count.twitter * 100,
+                    count.twitter.testing / count.twitter * 100,
+                    count.twitter.validation / count.twitter * 100,
+                    count.twitter / count.twitter * 100,
+                    NA)
+)
+rownames(corpora.count) <- c("Training", "Testing", "Validation", "Total",
+                             "Control (expected to be 0)")
+kable(corpora.count,
+      booktabs = TRUE,
+      col.names = c("Rows", "%", "Rows", "%", "Rows", "%")) %>%
+    add_header_above(header = c("",
+                                "Blogs" = 2,
+                                "News" = 2,
+                                "Twitter" = 2)) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+As the table shows, we have splitted the data on sub-sets as intended.
+
+
+# <a name="references"></a>References
+
+* <a name="hc_corpora"></a>(1) HC Corpora provided by [heliohost.org](heliohost.org).
+[About the corpora](https://web.archive.org/web/20160930083655/http://www.corpora.heliohost.org/aboutcorpus.html). [Download the corpora](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+
