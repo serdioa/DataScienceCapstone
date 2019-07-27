@@ -1,0 +1,67 @@
+Next Word Prediction: Stupid Backoff
+========================================================
+author: Alexey Serdyuk
+date: July 2019
+autosize: true
+
+Next Word Prediction
+========================================================
+
+This is the capstone project for the cycle of courses
+[Data Science Specialization](https://www.coursera.org/specializations/jhu-data-science)
+offered on [Coursera](https://www.coursera.org) by
+[Johns Hopkins University](https://www.jhu.edu).
+
+The purpose of this project is to develop a [Shiny application](https://shiny.rstudio.com/)
+which, given a text, predicts the next word. The prediction algorithm may be
+re-used as a part of a spelling correction module, or as a typing assistance
+for mobile devices.
+
+Application: https://serdioa.shinyapps.io/sb-predict
+
+Find source code and more on GitHube site: https://github.com/serdioa/DataScienceCapstone
+
+Algorithm
+========================================================
+
+The prediction algorithm is based on n-grams model. Training text corpus is
+split on 1- to 5-grams (sequences of 1 to 5 words). Each n-gram is divided on
+a prefix (first n-1 words) and a suffix (the last word). We predict the
+suffix based on the prefix and frequency of n-grams.
+
+Algorithm consists of two steps: choosing and ranking candidates. We choose
+as candidates all n-grams which starts with the prefix observed in the input
+text. We rank candidates using the [Stupid Backoff](https://www.aclweb.org/anthology/D07-1090)
+algorithm. A simple extension allows to predict partially entered words as the
+user types them.
+
+Off-sample tests show that our algorithm correctly predicts the next
+word in 15.39% of cases, 95%&nbsp;conf. interval (15.14%,&nbsp;15.65%). The correct
+word is amongst top 3 predictions in 25.04% of cases, 95%&nbsp;conf. interval
+(24.78%,&nbsp;25.30%).
+
+Application
+========================================================
+
+![Application Screenshot](application.png)
+
+* Start typing text into the input box, the prediction will appear below as you type.
+Alternatively, click "Random Sample" to choose one of more than 1000 examples.
+
+* You may select the number of predicted candidates (1 to 10).
+
+* Choose "Predict partially entered words" to predict word endings as you type.
+**In this mode you have to press the space character to predict the next word**.
+
+Prediction
+========================================================
+
+![Prediction Screenshot](prediction.png)
+
+* The application shows predictions as you type, displaying a chart with ranks
+of predicted words.
+
+* The prediction itself takes less than 20 ms, most of the observed delay is due
+to the Shiny framework and network latency.
+
+* For more information, click on the "About" menu tab in the application.

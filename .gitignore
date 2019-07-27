@@ -35,8 +35,6 @@ vignettes/*.pdf
 # Shiny token, see https://shiny.rstudio.com/articles/shinyapps.html
 rsconnect/
 
-data/
-
 data-split/
 
 MilestoneReportWeek2_files/
@@ -46,3 +44,9 @@ cache\.with-stop-words/
 cache\.without-stop-words/
 
 MilestoneReportWeek2\.R
+
+shiny/predict-sb/about\.html
+
+presentation/index-figure/
+
+presentation/index\.md
