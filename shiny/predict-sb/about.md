@@ -31,7 +31,12 @@ offered on [Coursera](https://www.coursera.org) by
 The purpose of the capstone project is to build a Natural Language Processing
 (NLP) application that, given a chunk of text, predicts the next most probable
 word. The application may be used, for example, in mobile devices to provide
-suggestions as the user tips in some text.
+suggestions as the user tips in some text, or as a part of a spelling correction
+module in a text editor.
+
+This document provides a short overview of the application. For a longer
+description, source code and more visit the GitHub site:
+https://github.com/serdioa/DataScienceCapstone.
 
 # <a name="model"></a>Model
 
