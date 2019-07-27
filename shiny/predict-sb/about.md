@@ -293,8 +293,8 @@ of over 1000 prepared sample texts.
 
 # <a name="references"></a>References
 
-* <a name="hc_corpora"></a>(1) HC Corpora provided by [heliohost.org](heliohost.org).
-[About the corpora](https://web.archive.org/web/20160930083655/http://www.corpora.heliohost.org/aboutcorpus.html). [Download the corpora](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+* <a name="hc_corpora"></a>(1) HC Corpora provided by [corpora.epizy.com](http://corpora.epizy.com).
+[About the corpora](http://corpora.epizy.com/about.html). [Download the corpora](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
 
 * <a name="stupid_backoff"></a>(2) Thorsten Brants, Ashok C. Popat, Peng Xu,
 Franz J. Och, Jeffrey Dean. 2007. Large Language Models in Machine
