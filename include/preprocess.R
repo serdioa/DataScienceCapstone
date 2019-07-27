@@ -13,6 +13,8 @@ library(stopwords)
 library(stringr)
 library(tokenizers)
 
+source("include/cache.R")
+
 #
 # Remove URLs. The regular expression detects http(s) and ftp(s) protocols.
 #
@@ -214,27 +216,6 @@ preprocess.text <- function(x, removeStopwords = FALSE) {
 }
 
 #
-# Return name of the directory with cached files with or without stop words.
-#
-# @param removeStopwords TRUE if stop words to be removed. Defaults to FALSE.
-#
-# @return the name of the appropriate cache directory.
-#
-cache.dir <- function(removeStopwords = FALSE) {
-    if (removeStopwords) {
-        cache.dir.name <- "cache.without-stop-words"
-    } else {
-        cache.dir.name <- "cache.with-stop-words"
-    }
-    
-    if (!dir.exists(cache.dir.name)) {
-        dir.create(cache.dir.name)
-    }
-    
-    cache.dir.name
-}
-
-#
 # Pre-processes the specified text, caching the result into a file. The cache
 # directory depends on whether stop words to be removed.
 #
@@ -275,19 +256,19 @@ preprocess.file <- function(x, name, messageName, removeStopwords = FALSE) {
 # @param removeStopwords TRUE if stop words to be removed. Defaults to FALSE.
 #
 preprocess.all <- function(removeStopwords = FALSE) {
-    blogs.text <- read_lines(file.path("cache", "en_US.blogs.training.txt"))
+    blogs.text <- text.original.cache("blogs", "training")
     blogs.text <- unlist(tokenizers::tokenize_sentences(blogs.text))
     blogs.text.preprocessed <<- preprocess.file(blogs.text,
                                                 "blogs.text.preprocessed.txt",
                                                 "blogs", removeStopwords)
-    
-    news.text <- read_lines(file.path("cache", "en_US.news.training.txt"))
+
+    news.text <- text.original.cache("news", "training")
     news.text <- unlist(tokenizers::tokenize_sentences(news.text))
     news.text.preprocessed <<- preprocess.file(news.text,
                                                "news.text.preprocessed.txt",
                                                "news", removeStopwords)
-    
-    twitter.text <- read_lines(file.path("cache", "en_US.twitter.training.txt"))
+
+    twitter.text <- text.original.cache("twitter", "training")
     twitter.text <- unlist(tokenizers::tokenize_sentences(twitter.text))
     twitter.text.preprocessed <<- preprocess.file(twitter.text,
                                                   "twitter.text.preprocessed.txt",
