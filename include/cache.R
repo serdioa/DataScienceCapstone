@@ -182,8 +182,8 @@ text.preprocessed.cache <- function(source, removeStopwords = FALSE) {
                 text <- text.preprocessed.load(source, removeStopwords)
             }
             
-            assign(var.name, var, envir = cache)
-            var
+            assign(var.name, text, envir = cache)
+            text
         }
     }
 }
