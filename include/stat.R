@@ -1,55 +1,81 @@
 #
-# Collect statistics about Stupid Backoff prediction algorithm.
+# Collect statistics about the n-grams and Stupid Backoff prediction algorithm.
 #
 
 library(dplyr)
 library(ggplot2)
 
-source("include/predict.sb.R")
-source("include/predict.test.R")
+source("include/cache.R")
+source("include/ngram.build.R")
+
+#
+# Collect size (rows and bytes) of the specified data frame.
+# Returns the data frame with columns "Rows" (contains the number of rows) and
+# "Size" (contains the size in Mb).
+#
+# @param df the data frame to collect statistics for.
+#
+# @return the collected statistics on the specified data frame.
+#
+stat.ngram.build <- function(df) {
+    df.rows = nrow(df)
+    df.size = as.numeric(strsplit(format(object.size(df), units = "MiB"), "\\s+")[[1]][1])
+    
+    data.frame(Rows = df.rows,
+               Size = df.size)
+}
 
 #
 # Collect size (rows and bytes) of non-optimized frequency table for n-grams.
+# Returns the data frame with columns "N" (contains the n), "Rows" (contains
+# the number of rows) and "Size" (contains the size in Mb).
 #
-stat.sb.table.enr.n <- function(n, removeStopwords = FALSE) {
-    # Load the original table.
-    table.orig <- table.enr.cache(n, removeStopwords)
-    
-    # To be fair, keep only the same columns as in the optimized data.
-    if (n == 1) {
-        table.norm <- data.frame(Suffix = table.orig$Suffix,
-                                 Prob = table.orig$SuffixProbLog)
-    } else {
-        table.norm <- data.frame(Prefix = table.orig$Prefix,
-                                 Suffix = table.orig$Suffix,
-                                 Prob = table.orig$SuffixProbLog)
-    }
-    
-    table.norm.nrow <- nrow(table.norm)
-    table.norm.size <- format(object.size(table.norm), units = "Mb")
-    
-    data.frame(N = n,
-               Rows = table.norm.nrow,
-               Size = table.norm.size)
+# @param n the parameter for n-grams.
+# @param removeStopwords TRUE to collect statistics for n-grams with stop words
+#       removed. Defaults to FALSE.
+#
+# @return collected statistics on the non-optimized frequency table.
+#
+stat.ngram.extended.n.build <- function(n, removeStopwords = FALSE) {
+    # Load the data.
+    ngram.extended <- ngram.extended.cache(n, removeStopwords)
+
+    # Calculate the statistics.
+    stat.ngram.build(ngram.extended) %>%
+        mutate(N = n) %>%
+        select(N, Rows, Size)
 }
 
 #
-# Collect size (rows and bytes) of non-optimized frequency table for all n-grams.
+# Collect size (rows and bytes) of non-optimized frequency tables for all
+# n-grams. Returns the data frame with columns "N" (contains the n), "Rows"
+# (contains the number of rows) and "Size" (contains the size in Mb).
 #
-stat.sb.table.enr <- function(removeStopwords = FALSE) {
-    rbind(stat.sb.table.enr.n(1, removeStopwords),
-          stat.sb.table.enr.n(2, removeStopwords),
-          stat.sb.table.enr.n(3, removeStopwords),
-          stat.sb.table.enr.n(4, removeStopwords),
-          stat.sb.table.enr.n(5, removeStopwords))
+# @param removeStopwords TRUE to collect statistics for n-grams with stop words
+#       removed. Defaults to FALSE.
+#
+# @return collected statistics on the non-optimized frequency tables.
+#
+stat.ngram.extended.all.build <- function(removeStopwords = FALSE) {
+    rbind(stat.ngram.extended.n.build(1, removeStopwords),
+          stat.ngram.extended.n.build(2, removeStopwords),
+          stat.ngram.extended.n.build(3, removeStopwords),
+          stat.ngram.extended.n.build(4, removeStopwords),
+          stat.ngram.extended.n.build(5, removeStopwords))
 }
 
 #
-# Cache size (rows and bytes) of non-optimized frequency table for all n-grams.
+# Returns cached size (rows and bytes) of non-optimized frequency tables for all
+# n-grams.
 #
-stat.sb.table.enr.cache <- function(removeStopwords = FALSE) {
-    var.name <- "stat.sb.enr"
-    var.build <- function() stat.sb.table.enr(removeStopwords)
+# @param removeStopwords TRUE to collect statistics for n-grams with stop words
+#       removed. Defaults to FALSE.
+#
+# @return collected statistics on the non-optimized frequency tables.
+#
+stat.ngram.extended.all.cache <- function(removeStopwords = FALSE) {
+    var.name <- "stat.ngram.extended.all"
+    var.build <- function() stat.ngram.extended.all.build(removeStopwords)
     
     get.var.cache(var.name, var.build, removeStopwords)
 }
