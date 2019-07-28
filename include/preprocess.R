@@ -189,6 +189,25 @@ preprocess.removeNonLatin <- function(tokens) {
 preprocess.addSentenceTokens <- function(tokens) c("STOS", tokens)
 
 #
+# Keep the specified stem, if it is included in the given table with
+# top-frequency stems. Otherwise, replaces the word with the special token "UNK"
+# (Unknown).
+#
+# @param 
+#
+preprocess.top.stem.keep <- function(stem, stems.freq.top) {
+    ifelse(is.na(fmatch(stem, stems.freq.top)), "UNK", stem)
+}
+
+# Stem the specified token, transform it to the lower case, and
+# replace with the UNK token if it is not in the list of top stems.
+preprocess.stem.word <- function(x, stems.freq.top) {
+    ifelse(x == "STOS", x, 
+           preprocess.top.stem.keep(SnowballC::wordStem(tolower(x), language = "en"),
+                                    stems.freq.top))
+}
+
+#
 # Pre-processes the specified text for further processing.
 #
 # @param x the text to be pre-processed. The text must be 1-element character
