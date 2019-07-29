@@ -14,6 +14,9 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Synopsis](#synopsis)
 * [Downloading and splitting the corpus](#download_and_split)
 * [Cleaning and preprocessing the corpus](#cleaning_preprocessing)
+* [Building n-grams](#building_n_grams)
+* [Binary encoding for stems](#binary_encoding)
+* [Optimizing n-gram tables](#optimizing_tables).
 * [References](#references)
 
 # <a name="synopsis"></a>Synopsis
@@ -190,8 +193,9 @@ such as Greek or Russian. We keep only words with standard and extended latin
 characters (that is, latin characters with various accents), but exclude words
 with any other characters.
 
-* Prepend the STOS (Start-of-Sentence) token. When building n-grams, this token
-will allow us to distinguish n-grams which appear at the start of the sentence.
+* Prepend the special token `STOS` (Start-of-Sentence). When building n-grams,
+this token will allow us to distinguish n-grams which appear at the start of the
+sentence.
 
 Natural language processing has a notion of [stop words](https://en.wikipedia.org/wiki/Stop_words),
 that is words which occure very often, and are often filtered out during
@@ -206,9 +210,436 @@ preprocess.all(removeStopwords = FALSE)
 preprocess.all(removeStopwords = TRUE)
 ```
 
+On our hardware (Intel i5-7600K) commands above runs several minutes.
+
+# <a name="building_n_grams"></a>Building n-grams
+
+In the previous section we have pre-processed the corpora: removed URLs and
+e-mail addresses, get rid of the punctuation etc. Our next task is to build
+n-grams and corresponding frequency tables.
+
+An important question is which library to use for processing and analyzing the
+corpora, as R provides several alternatives. Initially we attempted to use
+the library `tm`, but quickly found that the library is very memory-hungry,
+and an attempt to build bi- or trigrams for a large corpus are not practical.
+After some googling we decided to use the library `quanteda` instead.
+
+When building n-grams, we apply the following principles:
+
+* We build 1-grams to 5-grams.
+
+* In each n-gram we distinguish the prefix, that is the first (n-1) words,
+from the suffix, that is the last word. As the special case, 1-grams have
+an empty prefix (`NA`). We treat words in the prefix and the suffix differently
+as described below.
+
+* For the prefix, we keep only stems of words. For stemming we use the function
+`SnowballC::wordStem()`. Keeping only stems reduces the size of our tables,
+and allows to better use word patterns which otherwise may be not found due
+to slightly different word forms.
+
+* For the suffix (the last word of an n-gram) we keep the word "as is" without
+any transformations.
+
+* We build the list of top-frequency $2^{16}-2$ stems and keep only those 
+stems in n-gram prefixes. All other stems which appear only seldom are replaced
+in prefixes by the special token `UNK` (Unknown). The number $2^{16}-2$ allows
+us to represent each stem which may appear in an n-gram prefix, as well as
+2 special tokens `STOS` (Start-of-Sentence) and `UNK` (Unknown) with a number
+between $0$ and $2^{16}-1$. Reasons for this will be explained in the section
+[Binary encoding for stems](#binary_encoding).
+
+```{r eval=FALSE}
+source("include/ngram.build.R")
+for (n in 1:5) {
+  ngram.freq.cache(n, removeStopwords = FALSE)
+  ngram.freq.cache(n, removeStopwords = TRUE)
+}
+```
+
+On our hardware (Intel i5-7600K) commands above runs approximately 6 hours.
+
+As a result of this step, for 1- to 5-grams we obtain frequency tables with
+the columns `Term` (the n-gram $w_1,\ldots,w_n$) and `Freq` (the number of times
+$c(w_1,\ldots,w_n)$ this n-gram appears in the aggregated corpus).
+
+For the purpose of our task, that is prediction of the next word, we require
+the frequency table to be transformed. For each n-gram $w_1,\ldots,w_n$, the
+transformed table shall contain:
+
+* `Prefix` - the first $n-1$ words of the n-gram, that is $w_1,\ldots, w_{n-1}$.
+1-grams have an empty prefix `NA`.
+
+* `Suffix` - the last word of the n-gram, that is $w_n$.
+
+* `Prob` - maximum likehood estimate of the conditional probability of the
+`Suffix` $w_n$ given the `Prefix` $w_1,\ldots,w_{n-1}$
+
+$$P_{ML}(w_n | w_1,\ldots,w_{n-1}) = \frac{c(w_1,\ldots,w_n)}
+{\sum c(w_1,\ldots,w_{n-1},\bullet)}$$
+
+The sum in the denominator is over all n-grams sharing the same `Prefix`
+$w_1,\ldots,w_{n-1}$.
+
+```{r eval=FALSE}
+source("include/ngram.build.R")
+for (n in 1:5) {
+  ngram.extended.cache(n, removeStopwords = FALSE)
+  ngram.extended.cache(n, removeStopwords = TRUE)
+}
+```
+
+On our hardware (Intel i5-7600K) commands above runs a bit more than 1 hour
+and use slightly over 30 GB of the memory.
+
+The following table shows number of rows and memory usage of n-gram tables
+with and without stop words.
+
+```{r echo=FALSE, message=FALSE}
+source("include/stat.R")
+
+stat.ngram.extended.sw <- stat.ngram.extended.all.cache(removeStopwords = FALSE)
+stat.ngram.extended.nosw <- stat.ngram.extended.all.cache(removeStopwords = TRUE)
+stat.ngram.extended <- data.frame(
+    N = stat.ngram.extended.sw$N,
+    Rows.Sw = formatC(stat.ngram.extended.sw$Rows, big.mark = ",", format = "d"),
+    Size.Sw = formatC(stat.ngram.extended.sw$Size, big.mark = ",", format = "f", digits = 1),
+    Rows.Nosw = formatC(stat.ngram.extended.nosw$Rows, big.mark = ",", format = "d"),
+    Size.Nosw = formatC(stat.ngram.extended.nosw$Size, big.mark = ",", format = "f", digits = 1)
+)
+stat.ngram.extended.total <- data.frame(
+    N = "Total:",
+    Rows.Sw = "",
+    Size.Sw = formatC(sum(stat.ngram.extended.sw$Size), big.mark = ",", format = "f", digits = 1),
+    Rows.Nosw = "",
+    Size.Nosw = formatC(sum(stat.ngram.extended.nosw$Size), big.mark = ",", format = "f", digits = 1)
+)
+stat.ngram.extended.tbl <- rbind(stat.ngram.extended, stat.ngram.extended.total)
+
+kable(stat.ngram.extended.tbl,
+      booktabs = TRUE,
+      col.names = c("N", "Rows", "Size, MiB", "Rows", "Size, MiB"),
+      align=c("l", rep("r", times=4))) %>%
+    add_header_above(header = c("",
+                                "With stop words" = 2,
+                                "Without stop words" = 2)) %>%
+    row_spec(6, bold = T, background = "#C0C0C0") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+
+```
+
+As the table shows, tables are very large and do not satisfy requirements for a
+Shiny application (max. 1 GB). Besides, with very large tables we may expect
+a large latency. In the next sections we will reduce the size of the n-gram
+tables.
+
+# <a name="binary_encoding"></a>Binary encoding for stems
+
+As we have found in the previous section, our n-gram tables are very large. A
+very significant part of the memory usage is due to the prefixes. We decided to
+reduce the memory usage by using a binary encoding for the prefixes.
+
+Although R has the data type `raw` which works directly with bytes, the storage
+of this data type is very inefficient, besides, in our experience it is very
+inconvenient to use as a column in a data frame. We decided to encode stems
+as R data type `integer` (4 bytes) and `numeric` (8 bytes) instead.
+
+Theoretically the [Huffman coding](https://en.wikipedia.org/wiki/Huffman_coding)
+may have been used to compress the data and reduce the storage size, but in our
+case it is not practical: since our prefixes contains up to 4 stems, and we
+want to encode $2^{16}$ tokens, even by using the Huffmann encoding we will not
+be able to compress each prefix under 4 bytes, so we have to use 8-bytes storage
+anyway. To simplify the implementation, we decided for a simple non-compressing
+encoding instead.
+
+* Each of top-frequency $2^{16}-2$ stems, as well as 2 special tokens `STOS`
+(Start-of-Sentence) and `UNK` (Unknown) is assigned a code from $0$ to
+$2^{16}-1$ which may be represented as 2 bytes.
+
+* For 1-grams we do not require any encoding at all, because the prefix is
+always `NA`. Remember, the prefix is the first (n-1) words, that is $0$ words
+for 1-grams.
+
+* For 2-grams the prefix contains just 1 stem, so the encoding is just the code
+of the stem (4-bytes `integer`).
+
+* For 3-grams the prefix contains 2 stems. We transform their codes to 2 bytes
+each, concatenate these bytes into a 4-byte sequence, and interpret the sequence
+as a 4-bytes `integer`.
+
+* For 4-grams the prefix contains 3 stems. We transform their codes
+to 2 bytes each, concatenate these bytes together with two `0x00`-bytes into a
+8-bytes sequence, and interpret the sequence as an 8-bytes `numeric`.
+
+* For 5-grams the prefix contains 4 stems. We use the same approach as for
+4-grams, except that we do not need to add `0x00`-bytes since we already have
+8 bytes from prefix codes.
+
+Let us check some examples. We will encode the 4-gram "the answer to that",
+as well as it's 1-, 2- and 3-word prefixes.
+
+First, let us lookup codes for each stem in our 4-gram:
+```{r message=FALSE}
+source("include/ngram.encode.R")
+dict.stems <- dict.stems.cache()
+dict.hash <- dict.hash.cache()
+dict.hash[[c("the", "answer", "to", "that")]]
+```
+
+The corresponding hexadecimal codes are `0x0002`, `0x026B`, `0x0003`, `0x000B`.
+
+We start by encoding and decoding the first word, "the". For a 1-gram an
+encoded value is just an `integer` equal to the code, that is the encoded value
+is 2.
+
+```{r}
+enc.1 <- tokens.encode.1(c("the"), dict.hash)
+enc.1
+tokens.decode.1(enc.1, dict.stems)
+```
+
+We continue with the 2-gram "the answer". Concatenated hexadecimal codes are
+`0x0002026B`. Interpreted as an `integer` (little-endian), that gives us
+1795293696.
+
+```{r}
+enc.2 <- tokens.encode.2(c("the", "answer"), dict.hash)
+enc.2
+tokens.decode.2(enc.2, dict.stems)
+```
+
+Next we encode the 3-gram "the answer to". We concatenate the hexadecimal codes
+and append two `0x00` bytes to get 8 bytes in total to obtain
+`0x0002026B00030000`. Interpreted as a `numeric` (little-endian), that gives
+us 1.6305797604007e-311. Note that the decimal notation is not precise enough:
+to correctly decode the value, you require absolutely exact value which preserves
+every single bit.
+
+```{r}
+enc.3 <- tokens.encode.3(c("the", "answer", "to"), dict.hash)
+enc.3
+tokens.decode.3(enc.3, dict.stems)
+```
+
+Finally, we encode the 4-gram "the answer to that". We concatenate
+the hexadecimal codes to obtain 8-bytes sequence `0x0002026B0003000B`, and
+interpret it as a `numeric` (little-endian) 1.0663795695223075e-255. The same
+note about the decimal notation as for the 3-gram applies here as well.
+
+```{r}
+enc.4 <- tokens.encode.4(c("the", "answer", "to", "that"), dict.hash)
+enc.4
+tokens.decode.4(enc.4, dict.stems)
+```
+
+We will use the binary encoding of prefixes in the next section to reduce the
+size of n-gram tables.
+
+# <a name="optimizing_tables"></a>Optimizing n-gram tables
+
+In the section [Building n-grams](#building_n_grams) we built n-gram tables,
+and found that the tables are too large. In the previous section
+[Binary encoding for stems](#binary_encoding) we have developed a method to
+encode prefixes of n-grams either as `integer` or as `numeric`, dependent on
+a size of the prefix.
+
+Let's apply the encoding to prefixes of our n-gram tables. We also use this
+opportunity to remove the column `Prefix` from 1-grams since it is always `NA`
+anyway.
+
+```{r eval=FALSE}
+source("include/ngram.optimize.R")
+for (n in 1:5) {
+  ngram.optimize.prefix.cache(n, removeStopwords = FALSE)
+  ngram.extended.prefix.cache(n, removeStopwords = TRUE)
+}
+```
+
+On our hardware (Intel i5-7600K) commands above runs a bit less than 4 hours.
+
+```{r echo=FALSE, message=FALSE}
+stat.ngram.extended.sw <- stat.ngram.extended.all.cache(removeStopwords = FALSE)
+stat.ngram.extended.nosw <- stat.ngram.extended.all.cache(removeStopwords = TRUE)
+stat.ngram.opt.pref.sw <- stat.ngram.optimize.prefix.all.cache(removeStopwords = FALSE)
+stat.ngram.opt.pref.nosw <- stat.ngram.optimize.prefix.all.cache(removeStopwords = TRUE)
+```
+
+The following table shows size of n-gram tables with encoded prefixes compared
+to original tables. The improvement is more pronounced for larger n.
+For instance, the size of the 5-grams table with stop words is reduced from
+`r stat.ngram.extended.sw$Size[5]` MiB to `r stat.ngram.opt.pref.sw$Size[5]`
+MiB, or just to `r sprintf("%.2f%%", stat.ngram.opt.pref.sw$Size[5] / stat.ngram.extended.sw$Size[5] * 100)` of the former size.
+ 
+```{r echo=FALSE, message=FALSE}
+stat.ngram.opt.pref <- data.frame(
+    N = stat.ngram.extended.sw$N,
+    Old.Rows.Sw = formatC(stat.ngram.extended.sw$Rows, big.mark = ",", format = "d"),
+    Old.Size.Sw = formatC(stat.ngram.extended.sw$Size, big.mark = ",", format = "f", digits = 1),
+    New.Size.Sw = formatC(stat.ngram.opt.pref.sw$Size, big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Sw = sprintf("%.2f",
+                           stat.ngram.opt.pref.sw$Size /
+                             stat.ngram.extended.sw$Size * 100.0),
+    Old.Rows.Nosw = formatC(stat.ngram.extended.nosw$Rows, big.mark = ",", format = "d"),
+    Old.Size.Nosw = formatC(stat.ngram.extended.nosw$Size, big.mark = ",", format = "f", digits = 1),
+    New.Size.Nosw = formatC(stat.ngram.opt.pref.nosw$Size, big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Nosw = sprintf("%.2f",
+                             stat.ngram.opt.pref.nosw$Size /
+                               stat.ngram.extended.nosw$Size * 100.0)
+)
+stat.ngram.opt.pref.total <- data.frame(
+    N = "Total:",
+    Old.Rows.Sw = "",
+    Old.Size.Sw = formatC(sum(stat.ngram.extended.sw$Size), big.mark = ",", format = "f", digits = 1),
+    New.Size.Sw = formatC(sum(stat.ngram.opt.pref.sw$Size), big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Sw = sprintf("%.2f",
+                           sum(stat.ngram.opt.pref.sw$Size) /
+                             sum(stat.ngram.extended.sw$Size) * 100.0),
+    Old.Rows.Nosw = "",
+    Old.Size.Nosw = formatC(sum(stat.ngram.extended.nosw$Size), big.mark = ",", format = "f", digits = 1),
+    New.Size.Nosw = formatC(sum(stat.ngram.opt.pref.nosw$Size), big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Nosw = sprintf("%.2f",
+                             sum(stat.ngram.opt.pref.nosw$Size) /
+                               sum(stat.ngram.extended.nosw$Size) * 100)
+)
+stat.ngram.opt.pref.tbl <- rbind(stat.ngram.opt.pref, stat.ngram.opt.pref.total)
+
+kable(stat.ngram.opt.pref.tbl,
+      booktabs = TRUE,
+      col.names = 
+        c("N", "Rows", "Original Size, MiB", "Optimized Size, MiB", "Optimized vs. Original, %",
+               "Rows", "Original Size, MiB", "Optimized Size, MiB", "Optimized vs. Original, %"),
+      align=c("l", rep("r", times=8))) %>%
+    add_header_above(header = c("",
+                                "With stop words" = 4,
+                                "Without stop words" = 4)) %>%
+    row_spec(6, bold = T, background = "#C0C0C0") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+
+```
+
+Another opportunity for reducing the required memory is the column `Prob` which
+contains the maximum likehood estimate of the conditional probability of the
+`Suffix` given the `Prefix`. Instead of storing it as a `numeric` column
+(8 bytes for each value) we may squeeze it into the `integer` (4 bytes) using
+the scaled log approach. The easiest way to explain this approach is with an
+example:
+
+```{r echo=FALSE, message=FALSE}
+#ngram.ext.full.2 <- ngram.extended.full.cache(2)
+#ngram.ext.full.2.at <- sum((ngram.ext.full.2 %>% filter(Prefix == "at"))$Freq)
+#ngram.ext.full.2.at.the <- (ngram.ext.full.2 %>% filter(Prefix == "at" & Suffix == "The"))$Freq
+ngram.ext.full.2.at <- 330145
+ngram.ext.full.2.at.the <- 2035
+ngram.ext.full.2.at.the.p <- ngram.ext.full.2.at.the / ngram.ext.full.2.at
+ngram.ext.full.2.at.the.p.log <- log(ngram.ext.full.2.at.the.p)
+ngram.ext.full.2.at.the.p.log.int <- as.integer(ngram.ext.full.2.at.the.p.log * 1000000)
+ngram.ext.full.2.at.the.p.back = exp(ngram.ext.full.2.at.the.p.log.int / 1000000)
+ngram.ext.full.2.at.the.p.diff = ngram.ext.full.2.at.the.p.back - ngram.ext.full.2.at.the.p
+ngram.ext.full.2.at.the.p.diff.rel = ngram.ext.full.2.at.the.p.diff / ngram.ext.full.2.at.the.p
+```
+
+* There are `r formatC(ngram.ext.full.2.at, big.mark = ",", format = "d")` 2-grams
+starting with the word "at". In 
+`r formatC(ngram.ext.full.2.at.the, big.mark = ",", format = "d")` cases the word
+"at" is followed by the word "the", giving the 2-gram "at the". We calculate
+the maximum likehood estimate of the suffix "the" given the prefix "at" as
+
+$$P_{ML}(\text{the} | \text{at}) = \frac{c(\text{at the})}
+{\sum c(\text{at } \bullet)} = \frac{2035}{330145} \approx 0.006163958$$
+
+* We calculate the natural logarithm of the value: $log(P_{ML}(\text{the} | \text{at})) =$
+`r ngram.ext.full.2.at.the.p.log`.
+
+* We multiply the logarithm by $10^6$ and get an integer part of the result.
+Multiplying by $10^6$ ensures that we preserve 6 digits after the decimal point
+in the original logarithm. In our example we get
+`r ngram.ext.full.2.at.the.p.log.int`.
+
+* When we require the original value, we inverse the transformation, dividing
+the optimized value by $10^6$ and taking the exponent of it. Continuing our
+example, exp(`r ngram.ext.full.2.at.the.p.log.int` / $10^6$) =
+`r sprintf("%.9f", ngram.ext.full.2.at.the.p.back)`.
+
+* By rounding to `integer` we lost some precision, but the difference is just
+`r sprintf("%.10f", ngram.ext.full.2.at.the.p.diff)`, or
+`r sprintf("%.8f%%", ngram.ext.full.2.at.the.p.diff.rel)` of the original value,
+which is negligible for our purposes.
+
+* At the price of very slight precision loss we could store our values as an
+`integer` (4 bytes per value) instead of a `numeric` (8 bytes).
+
+```{r echo=FALSE, message=FALSE}
+stat.ngram.opt.prob.sw <- stat.ngram.optimize.prob.all.cache(removeStopwords = FALSE)
+stat.ngram.opt.prob.nosw <- stat.ngram.optimize.prob.all.cache(removeStopwords = TRUE)
+```
+
+The folowing table shows size of n-gram tables with probabilities optimized for
+low memory consumption compared to the previous version with encoded prefixes.
+The size reduction is not as significant as in the previous step, but still we
+managed to reduce the memory usage to
+`r sprintf("%.2f%%", sum(stat.ngram.opt.prob.sw$Size) / sum(stat.ngram.opt.pref.sw$Size) * 100.0)`
+of the original when keeping stop words, and approximately the same amount
+when removing stop words.
+
+```{r echo=FALSE, message=FALSE}
+stat.ngram.opt.prob.sw <- stat.ngram.optimize.prob.all.cache(removeStopwords = FALSE)
+stat.ngram.opt.prob.nosw <- stat.ngram.optimize.prob.all.cache(removeStopwords = TRUE)
+
+stat.ngram.opt.prob <- data.frame(
+    N = stat.ngram.extended.sw$N,
+    Old.Rows.Sw = formatC(stat.ngram.extended.sw$Rows, big.mark = ",", format = "d"),
+    Old.Size.Sw = formatC(stat.ngram.opt.pref.sw$Size, big.mark = ",", format = "f", digits = 1),
+    New.Size.Sw = formatC(stat.ngram.opt.prob.sw$Size, big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Sw = sprintf("%.2f",
+                           stat.ngram.opt.prob.sw$Size /
+                             stat.ngram.opt.pref.sw$Size * 100.0),
+    Old.Rows.Nosw = formatC(stat.ngram.extended.nosw$Rows, big.mark = ",", format = "d"),
+    Old.Size.Nosw = formatC(stat.ngram.opt.pref.nosw$Size, big.mark = ",", format = "f", digits = 1),
+    New.Size.Nosw = formatC(stat.ngram.opt.prob.nosw$Size, big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Nosw = sprintf("%.2f",
+                             stat.ngram.opt.prob.nosw$Size /
+                               stat.ngram.opt.pref.nosw$Size * 100.0)
+)
+stat.ngram.opt.prob.total <- data.frame(
+    N = "Total:",
+    Old.Rows.Sw = "",
+    Old.Size.Sw = formatC(sum(stat.ngram.opt.pref.sw$Size), big.mark = ",", format = "f", digits = 1),
+    New.Size.Sw = formatC(sum(stat.ngram.opt.prob.sw$Size), big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Sw = sprintf("%.2f",
+                           sum(stat.ngram.opt.prob.sw$Size) /
+                             sum(stat.ngram.opt.pref.sw$Size) * 100.0),
+    Old.Rows.Nosw = "",
+    Old.Size.Nosw = formatC(sum(stat.ngram.opt.pref.nosw$Size), big.mark = ",", format = "f", digits = 1),
+    New.Size.Nosw = formatC(sum(stat.ngram.opt.prob.nosw$Size), big.mark = ",", format = "f", digits = 1),
+    Diff.Size.Nosw = sprintf("%.2f",
+                             sum(stat.ngram.opt.prob.nosw$Size) /
+                               sum(stat.ngram.opt.pref.nosw$Size) * 100)
+)
+stat.ngram.opt.prob.tbl <- rbind(stat.ngram.opt.prob, stat.ngram.opt.prob.total)
+
+kable(stat.ngram.opt.prob.tbl,
+      booktabs = TRUE,
+      col.names = 
+        c("N", "Rows", "Original Size, MiB", "Optimized Size, MiB", "Optimized vs. Original, %",
+               "Rows", "Original Size, MiB", "Optimized Size, MiB", "Optimized vs. Original, %"),
+      align=c("l", rep("r", times=8))) %>%
+    add_header_above(header = c("",
+                                "With stop words" = 4,
+                                "Without stop words" = 4)) %>%
+    row_spec(6, bold = T, background = "#C0C0C0") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+
+```
+
+The total memory usage is still above our maximum allowed value of 1 GB.
+To achieve it, we have to find another ways to reduce the tables. But before
+we do it, let us discuss our prediction algorithm and run some tests.
 
 # <a name="references"></a>References
 
-* <a name="hc_corpora"></a>(1) HC Corpora provided by [heliohost.org](heliohost.org).
-[About the corpora](https://web.archive.org/web/20160930083655/http://www.corpora.heliohost.org/aboutcorpus.html). [Download the corpora](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+* <a name="hc_corpora"></a>(1) HC Corpora provided by [corpora.epizy.com](http://corpora.epizy.com).
+[About the corpora](http://corpora.epizy.com/about.html). [Download the corpora](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
 

@@ -242,7 +242,8 @@ stems.top.build <- function(removeStopwords = FALSE) {
     # The token STOS is already included in stems, so we must make place
     # only for the token UNK, that is we may encode (256 * 256 - 2) top
     # stems.
-    data.frame(Terms = stems.freq$Terms[1:(256 * 256 - 1)])
+    data.frame(Terms = stems.freq$Terms[1:(256 * 256 - 1)]) %>%
+        mutate_if(is.factor, as.character)
 }
 
 #
@@ -292,7 +293,7 @@ ngram.freq.cache <- function(n, removeStopwords = FALSE) {
 }
 
 #
-# Builds an extended n-gram frequency table with columns "Prefix", "Suffix"
+# Builds an extended n-gram frequency table by adding columns "Prefix", "Suffix"
 # and "Prob". The "Prefix" and "Suffix" are obtained by splitting the input
 # column "Term" (n-gram) on the first (n-1) words ("Prefix") and the last word
 # ("Suffix"). For 1-grams the "Prefix" is always NA. The "Prob" is a maximum
@@ -303,20 +304,22 @@ ngram.freq.cache <- function(n, removeStopwords = FALSE) {
 # @return the extended n-gram frequency table with columns "Prefix", "Suffix"
 #       and "Prob".
 #
-ngram.extended.build <- function(ngram.freq) {
+ngram.extended.full.build <- function(ngram.freq) {
     message("Splitting n-grams on prefix and suffix")
     splitted <- strsplit(ngram.freq$Terms, "\\s+(?=[^\\s]+$)", perl = TRUE)
     
     message("Merging splitted n-grams to the source data")
     if (length(splitted[[1]]) > 1) {
-        ngram.freq <- data.frame(Prefix = unlist(lapply(splitted, "[[", 1)),
-                                 Suffix = unlist(lapply(splitted, "[[", 2)),
-                                 Freq = ngram.freq$Freq)
+        ngram.freq <- ngram.freq %>%
+            mutate(Prefix = unlist(lapply(splitted, "[[", 1)),
+                   Suffix = unlist(lapply(splitted, "[[", 2)),
+                   Freq = ngram.freq$Freq)
     } else {
         # Attempted to split 1-grams. No prefixes are available.
-        ngram.freq <- data.frame(Prefix = NA,
-                                 Suffix = ngram.freq$Terms,
-                                 Freq = ngram.freq$Freq)
+        ngram.freq <- ngram.freq %>%
+            mutate(Prefix = as.character(NA),
+                   Suffix = ngram.freq$Terms,
+                   Freq = ngram.freq$Freq)
     }
     
     rm (splitted)
@@ -325,30 +328,76 @@ ngram.extended.build <- function(ngram.freq) {
     ngram.freq %>%
         group_by(Prefix) %>%
         mutate(Prob = Freq / sum(Freq)) %>%
-        ungroup() %>%
+        ungroup()
+}
+
+#
+# Caches an extended n-gram frequency table by adding columns "Prefix", "Suffix"
+# and "Prob". The "Prefix" and "Suffix" are obtained by splitting the input
+# column "Term" (n-gram) on the first (n-1) words ("Prefix") and the last word
+# ("Suffix"). For 1-grams the "Prefix" is always NA. The "Prob" is a maximum
+# likehood estimate of the probability of the "Prefix" given "Suffix".
+#
+# @param n the n parameter for n-grams.
+# @param removeStopwords TRUE to build the frequency table without stop words.
+#       Defaults to FALSE.
+#
+# @return the extended n-gram frequency table with columns "Prefix", "Suffix"
+#       and "Prob".
+#
+ngram.extended.full.cache <- function(n, removeStopwords = FALSE) {
+    var.name <- paste0("ngram.", n, ".extended.full")
+    var.build <- function() {
+        ngram.freq <- ngram.freq.cache(n, removeStopwords)
+        
+        message("Building full extended ", n, "-gram frequency table ",
+                ifelse(removeStopwords, "without stop words", "with stop words"))
+        
+        ngram.extended.full.build(ngram.freq)
+    }
+    
+    get.var.cache(var.name, var.build, removeStopwords)
+}
+
+#
+# Builds a normalized extended n-gram frequency table with columns "Prefix",
+# "Suffix" and "Prob". The "Prefix" and "Suffix" are obtained by splitting the
+# input column "Term" (n-gram) on the first (n-1) words ("Prefix") and the last
+# word ("Suffix"). For 1-grams the "Prefix" is always NA. The "Prob" is a
+# maximum likehood estimate of the probability of the "Prefix" given "Suffix".
+#
+# @param ngram.extended.full.freq the full extended frequency table.
+#
+# @return the normalized extended n-gram frequency table with columns "Prefix",
+#       "Suffix" and "Prob".
+#
+ngram.extended.build <- function(ngram.extended.full.freq) {
+    ngram.extended.full.freq %>%
         select(Prefix, Suffix, Prob)
 }
 
 #
-# Caches an extended n-gram frequency table by splitting each n-gram on
-# a prefix (first n-1 elements) and suffix (last element), and storing them
+# Caches a normalized extended n-gram frequency table by splitting each n-gram
+# on a prefix (first n-1 elements) and suffix (last element), and storing them
 # in separate columns "Prefix" and "Suffix". For 1-grams the prefix is NA,
 # the suffix is the n-gram itself.
 #
-# @param ngram.freq thre frequency table with columns "Terms" and "Freq".
+# @param n the n parameter for n-grams.
+# @param removeStopwords TRUE to build the frequency table without stop words.
+#       Defaults to FALSE.
 #
-# @return the extended n-gram frequency table with columns "Prefix" and
-#       "Suffix".
+# @return the normalized extended n-gram frequency table with columns "Prefix"
+#       and "Suffix".
 #
 ngram.extended.cache <- function(n, removeStopwords = FALSE) {
     var.name <- paste0("ngram.", n, ".extended")
     var.build <- function() {
-        ngram.freq <- ngram.freq.cache(n, removeStopwords)
+        ngram.extended.full <- ngram.extended.full.cache(n, removeStopwords)
 
-        message("Building extended ", n, "-gram frequency table ",
+        message("Building normalized extended ", n, "-gram frequency table ",
                 ifelse(removeStopwords, "without stop words", "with stop words"))
 
-        ngram.extended.build(ngram.freq)
+        ngram.extended.build(ngram.extended.full)
     }
     
     get.var.cache(var.name, var.build, removeStopwords)
