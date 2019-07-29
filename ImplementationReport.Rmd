@@ -570,6 +570,20 @@ which is negligible for our purposes.
 * At the price of very slight precision loss we could store our values as an
 `integer` (4 bytes per value) instead of a `numeric` (8 bytes).
 
+```{r eval=FALSE}
+for (n in 1:5) {
+  ngram.optimize.prob.cache(n, removeStopwords = FALSE)
+  ngram.extended.prob.cache(n, removeStopwords = TRUE)
+}
+```
+
+On our hardware (Intel i5-7600K) commands above runs approximately 5 minutes.
+
+```{r echo=FALSE, message=FALSE}
+stat.ngram.opt.prob.sw <- stat.ngram.optimize.prob.all.cache(removeStopwords = FALSE)
+stat.ngram.opt.prob.nosw <- stat.ngram.optimize.prob.all.cache(removeStopwords = TRUE)
+```
+
 ```{r echo=FALSE, message=FALSE}
 stat.ngram.opt.prob.sw <- stat.ngram.optimize.prob.all.cache(removeStopwords = FALSE)
 stat.ngram.opt.prob.nosw <- stat.ngram.optimize.prob.all.cache(removeStopwords = TRUE)
@@ -577,16 +591,14 @@ stat.ngram.opt.prob.nosw <- stat.ngram.optimize.prob.all.cache(removeStopwords =
 
 The folowing table shows size of n-gram tables with probabilities optimized for
 low memory consumption compared to the previous version with encoded prefixes.
-The size reduction is not as significant as in the previous step, but still we
-managed to reduce the memory usage to
+The size reduction is not as significant as in the previous step.
+For instance, the total size of n-gram tables with stop words is reduced from
+`r sum(stat.ngram.opt.pref.sw$Size)` MiB to `r sum(stat.ngram.opt.prob.sw$Size)`
+MiB, or to
 `r sprintf("%.2f%%", sum(stat.ngram.opt.prob.sw$Size) / sum(stat.ngram.opt.pref.sw$Size) * 100.0)`
-of the original when keeping stop words, and approximately the same amount
-when removing stop words.
+of the former size.
 
 ```{r echo=FALSE, message=FALSE}
-stat.ngram.opt.prob.sw <- stat.ngram.optimize.prob.all.cache(removeStopwords = FALSE)
-stat.ngram.opt.prob.nosw <- stat.ngram.optimize.prob.all.cache(removeStopwords = TRUE)
-
 stat.ngram.opt.prob <- data.frame(
     N = stat.ngram.extended.sw$N,
     Old.Rows.Sw = formatC(stat.ngram.extended.sw$Rows, big.mark = ",", format = "d"),
@@ -634,9 +646,9 @@ kable(stat.ngram.opt.prob.tbl,
 
 ```
 
-The total memory usage is still above our maximum allowed value of 1 GB.
-To achieve it, we have to find another ways to reduce the tables. But before
-we do it, let us discuss our prediction algorithm and run some tests.
+The total memory usage is still above our maximum allowed size of 1 GB.
+To achieve it, we have to find another ways to reduce the tables with n-grams.
+But before we do it, let us discuss our prediction algorithm and run some tests.
 
 # <a name="references"></a>References
 
