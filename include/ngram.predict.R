@@ -1,240 +1,227 @@
 #
-# Predicts next word based on pre-calculated n-grams.
+# Predicts next word based on pre-calculated n-grams using the Stupid Backoff
+# algorithm.
 #
-# if (!exists('ngram.predict')) {
-    ngram.predict <- TRUE
-    
-    library(dplyr)
-    library(fastmatch)
-    library(readr)
-    library(stringr)
-    
-    all.ngram.collapsed.load.n <- function(n) {
-        all.ngram.collapsed.var <- paste0("all.", n, "gram.collapsed")
-        if (!exists(all.ngram.collapsed.var)) {
-            message("Loading collapsed ", n, "-grams")
-            all.ngram.collapsed.file <- paste0("cache/all.", n, "gram.collapsed.RDS")
-            assign(all.ngram.collapsed.var,
-                   readRDS(all.ngram.collapsed.file),
-                   inherits = TRUE)
-            message("Done loading collapsed ", n, "-grams")
-        }
-    }
-    
-    all.ngram.collapsed.load <- function() {
-        all.ngram.collapsed.load.n(2)
-        all.ngram.collapsed.load.n(3)
-        all.ngram.collapsed.load.n(4)
-    }
-    
-    all.ngram.hash.cache <- function() {
-        all.ngram.collapsed.load()
-        
-        all.ngram.hash <- list()
-        
-        all.ngram.hash$Prefix.2 <- fmatch.hash("test", all.2gram.collapsed$Prefix)
-        all.ngram.hash$Prefix.3 <- fmatch.hash("test", all.3gram.collapsed$Prefix)
-        all.ngram.hash$Prefix.4 <- fmatch.hash("test", all.4gram.collapsed$Prefix)
-        
-        return (all.ngram.hash)
-    }
-    
-    # Remove URLs. The regular expression detects http(s) and ftp(s) protocols.
-    preprocess.removeUrl <- function(x) gsub("(ht|f)tp(s?)://\\S+", "", x)
-    
-    # Remove e-mail addresses.
-    # The regular expression from Stack Overflow:
-    # https://stackoverflow.com/questions/201323/how-to-validate-an-email-address-using-a-regular-expression
-    preprocess.removeEmail <- function(x) gsub("(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])", "", x, perl = TRUE)
-    
-    # Remove hash tags (the character # and the following word) and twitter handles
-    # (the character @ and the following word).
-    preprocess.removeTagsAndHandles <- function(x) gsub("[@#]\\S+", "", x)
-    
-    # Surround punctuation marks which does not appear inside a word with space
-    # characters. Without this step, fragments with a missing space are transformed
-    # to a single non-existing word when punctuation is removed.
-    # Example: corpus contains
-    # "I had the best day yesterday,it was like two kids in a candy store"
-    # Without this step, "yesterday,it" is transformed to a non-existing word
-    # "yesterdayit" when removing punctuation. This step transforms it to
-    # "yesterday, it"
-    preprocess.addMissingSpace <- function(x) gsub("[,()\":;”…]", " ", x)
-    
-    # Replace words in a sentence with replacements available from the table.
-    # Keep words which are not in the replacement table "as is".
-    # As a side effect, removes punctuation and transforms to a lower case.
-    replacements.text <- readr::read_csv("replacements.txt",
-                                         col_names = c("token", "replacement"),
-                                         col_types = list(col_character(), col_character()))
-    
-    preprocess.replaceWords <- function(text, replacements) {
-        # Replace character often used in the sample text instead of the
-        # upper quote in abbreviations.
-        text <- gsub("’", "'", text)
-        text <- gsub("\u0092", "'", text)
-        
-        # Split text on words. Keep the words uppercase.
-        tokens.orig <- tokenizers::tokenize_words(text,
-                                                  lowercase = FALSE,
-                                                  simplify = TRUE,
-                                                  strip_numeric = TRUE)
-        
-        # Attempt to replace each word.
-        unlist(sapply(tokens.orig, function(x) {
-            # Search if a replacement exist.
-            replacement.index <- match(x, replacements$token)
-            if (is.na(replacement.index)) {
-                # Can't find a replacement, try lowercase.
-                replacement.index <- match(tolower(x), replacements$token)
-                if (is.na(replacement.index)) {
-                    # Still can't find a replacement, fall back on the token.
-                    return (x)
-                } else {
-                    # Found a replacement with lowercase. replace the token.
-                    return (tokenizers::tokenize_words(
-                        replacements$replacement[replacement.index],
-                        lowercase = TRUE,
-                        simplify = TRUE,
-                        strip_numeric = TRUE))
-                }
-            } else {
-                # Replace the token.
-                return (tokenizers::tokenize_words(
-                    replacements$replacement[replacement.index],
-                    lowercase = TRUE,
-                    simplify = TRUE,
-                    strip_numeric = TRUE))
-            }
-        }, USE.NAMES = FALSE))
-    }
-    
-    preprocess.stems.top.load <- function() {
-        # Load all stems.
-        stems.freq.file <- "cache/stems.freq.RDS"
-        stems.freq <- readRDS(stems.freq.file)
-        
-        # We will use 2 bytes to encode each stem, but we require 2 additional
-        # special tokens: STOS for Start-Of-Sentence, and UNK for a Unknown
-        # Word, that is a word which is not included in our encoding table.
-        # The token STOS is already included in stems, so we must make place
-        # only for the token UNK, that is we may encode (256 * 256 - 2) top
-        # stems.
-        tibble(Terms = stems.freq$Terms[1:(256 * 256 - 1)])
-    }    
-    
-    preprocess.stems.top <- unlist(preprocess.stems.top.load())
-    
-    # Keep the word, if it is included in the table with top stems.
-    # Otherwise, replaces the word with the specified token.
-    preprocess.top.stem.keep <- function(stem) {
-        ifelse(is.na(fmatch(stem, preprocess.stems.top)), "UNK", stem)
-    }
-    
-    # Stem the specified token, transform it to the lower case, and
-    # replace with the UNK token if it is not in the list of top stems.
-    preprocess.stem.word <- function(x) {
-        ifelse(x == "STOS",
-               x,
-               preprocess.top.stem.keep(SnowballC::wordStem(tolower(x), language = "en")))
-    }
-    
-    # Add tokens representing start of a sentence.
-    # STOS = Start Of Sentence.
-    preprocess.addSentenceTokens <- function(x) c("STOS", x)
-    
-    # Collapse space characters: if there are more than 1 space character in a row,
-    # replace with a single one.
-    preprocess.collapseWhitespace <- function(x) gsub("\\s+", " ", x)
-    
-    # Define severel functions and combine them in a pre-processing chain.
-    preprocess.text <- function(data.text) {
-        # Split the text on sentences and keep only the last one.
-        data.sentences <- unlist(tokenizers::tokenize_sentences(data.text))
-        data.sentences.length <- length(data.sentences)
-        if (data.sentences.length < 1) {
-            return (NA)
-        }
-        text <- data.sentences[data.sentences.length]
 
-        # Preprocess the text.
-        text <- preprocess.removeUrl(text)
-        text <- preprocess.removeEmail(text)
-        text <- preprocess.removeTagsAndHandles(text)
-        text <- preprocess.addMissingSpace(text)
-        text <- preprocess.replaceWords(text, replacements.text)
-        text <- preprocess.stem.word(text)
-        text <- preprocess.addSentenceTokens(text)
+source("include/preprocess.R")
+source("include/ngram.optimize.R")
 
-        return(text)
+#
+# Pre-processes text before predicting next word based on the text.
+# The pre-processing transforms words to a format expected for the prefix:
+# only low case, only stems, no punctuation etc.
+#
+# @param data.text the text to be pre-processed before prediction.
+# @param removeStopwords TRUE to remove stop words from the text.
+#
+# @return the character vector with tokens of the pre-processed text.
+#
+preprocess.text.predict <- function(data.text, removeStopwords = FALSE) {
+    # Split the text on sentences and keep only the last one.
+    data.sentences <- unlist(tokenizers::tokenize_sentences(data.text))
+    data.sentences.length <- length(data.sentences)
+    if (data.sentences.length < 1) {
+        return (NA)
     }
-
-    verbose.message <- function(...) {
-        if (exists("verbose") && (verbose == TRUE)) {
-            message(...)
-        }
-    }
+    text <- data.sentences[data.sentences.length]
     
-    predict.word <- function(text, verbose = TRUE) {
-        tokens.all <- preprocess.text(text)
-        verbose.message("tokens.all=", paste(tokens.all, collapse = " "))
-        
-        tokens <- tail(tokens.all, 3)
-        if (length(tokens) >= 3) {
-            prefix <- paste0(tokens, collapse = " ")
-            verbose.message("prefix.4=", prefix)
+    # Preprocess the text.
+    text <- preprocess.removeUrl(text)
+    text <- preprocess.removeEmail(text)
+    text <- preprocess.removeTagsAndHandles(text)
+    text <- preprocess.removeUnderscores(text)
+    text <- preprocess.addMissingSpace(text)
+    
+    tokens <- preprocess.tokenize(text)
+    tokens <- preprocess.replaceWords(tokens)
+    if (removeStopwords) {
+        tokens <- preprocess.removeStopwords(tokens)
+    }
+    tokens <- preprocess.removeNonLatin(tokens)
+    tokens <- preprocess.stem.word(tokens, stems.top.cache(removeStopwords))
+    tokens <- preprocess.addSentenceTokens(tokens)
+    
+    tokens
+}
+
+#
+# Returns predicted candidate words following the specified tokens.
+#
+# The returned data frame contains the following columns:
+#
+# * Prefix - the text prefix used for prediction.
+# * Suffix - the predicted next word.
+# * N - the n parameter of n-gram used for this prediction.
+# * Prob - the column "Prob" from the n-gram table used for this prediction.
+# * Score - the score of this prediction. Score is not necessary a probability
+#       (scores do not sum to 1), but a higher score implies a higher
+#       probability.
+#
+# The returned data frame is sorted by score in the descending order, so that
+# the higher-scored (and thus higher-probability) candidates are on top.
+# 
+# @param prefix character vector with tokens.
+# @param word.pattern the regular expression for the predicted candidates.
+#       The pattern is used when predicting partially entered words.
+#       Defaults to NULL to not use any regular expression.
+# @param n number of candidates to return. Defaults to 5.
+# @param threshold the minimum number of n-gram occurencies to use for
+#       prediction. Defaults to 5.
+# @param removeStopwords TRUE to use n-grams with removed stop words.
+#       Defaults to FALSE.
+#
+# @return the data frame with predicted candidates.
+#
+sb.predict <- function(prefix, word.pattern = NULL, n = 5, threshold = 6, removeStopwords = FALSE) {
+    # Make the threshold the right length.
+    threshold <- rep(threshold, length.out = 5)
+    
+    prefix.length <- length(prefix)
+    
+    # Load the table for encoding the prefixes.        
+    dict.hash <- dict.hash.cache(removeStopwords)
+    
+    # Create a table to hold results.
+    candidates <- data.frame(Prefix = character(),
+                             Suffix = character(),
+                             N = integer(),
+                             SuffixProb = numeric(),
+                             Score = numeric())
+    
+    # Choose candidates from 5- to 2-grms.
+    # 1-grams (context-free prediction which completely ignores the prefix)
+    # are used only as the last resort if not enough candidates are found.
+    for (i in 4:1) {
+        if (prefix.length >= i) {
+            # Choose the right encoding function.
+            tokens.encode <- tokens.encode.n(i)
             
-            index <- fmatch(prefix, all.ngram.hash$Prefix.4)
-            if (!is.na(index)) {
-                found <- all.4gram.collapsed[index,]
-                print(found)
-            } else {
-                message("Can't find 4-gram")
-            }
-        }
-        
-        tokens <- tail(tokens.all, 2)
-        if (length(tokens) >= 2) {
-            prefix <- paste0(tokens, collapse = " ")
-            verbose.message("prefix.3=", prefix)
+            # Encode the (i-1) part of the prefix.
+            prefix.n <- tail(prefix, i)
+            prefix.n.code <- tokens.encode(prefix.n, dict.hash)
             
-            index <- fmatch(prefix, all.ngram.hash$Prefix.3)
-            if (!is.na(index)) {
-                found <- all.3gram.collapsed[index,]
-                print(found)
-            } else {
-                message("Can't find 3-gram")
+            # Choose candidates starting with our prefix from optimized
+            # table with n-grams.
+            table.ngram.n <- ngram.optimize.cache(i + 1,
+                                                  threshold = threshold[i + 1],
+                                                  removeStopwords = removeStopwords)
+            table.candidates.n <- table.ngram.n[.(prefix.n.code), nomatch = NULL][!(Suffix %in% candidates$Suffix)]
+            if (!is.null(word.pattern)) {
+                table.candidates.n <- table.candidates.n %>%
+                    filter(grepl(word.pattern, Suffix))
             }
-        }
-        
-        tokens <- tail(tokens.all, 1)
-        if (length(tokens) >= 1) {
-            prefix <- paste0(tokens, collapse = " ")
-            verbose.message("prefix.2=", prefix)
             
-            index <- fmatch(prefix, all.ngram.hash$Prefix.2)
-            if (!is.na(index)) {
-                found <- all.2gram.collapsed[index,]
-                print(found)
-            } else {
-                message("Can't find 2-gram")
+            if (nrow(table.candidates.n) > 0) {
+                table.candidates.n <- table.candidates.n %>%
+                    transmute(Prefix = paste0(prefix.n, collapse = " "),
+                              Suffix = Suffix,
+                              N = i,
+                              SuffixProb = Prob,
+                              Score = exp(Prob / 1000000 + log(0.4) * (min(4, prefix.length) - i)))
+                
+                candidates <- rbind(candidates, table.candidates.n)
             }
         }
     }
     
-    quiz.3 <- function() {
-        predict.word("The guy in front of me just bought a pound of bacon, a bouquet, and a case of")
-        predict.word("You're the reason why I smile everyday. Can you follow me please? It would mean the")
-        predict.word("Hey sunshine, can you follow me and make me the")
-        predict.word("Very early observations on the Bills game: Offense still struggling but the")
-        predict.word("Go on a romantic date at the")
-        predict.word("Well I'm pretty sure my granny has some old bagpipes in her garage I'll dust them off and be on my")
-        predict.word("Ohhhhh #PointBreak is on tomorrow. Love that film and haven't seen it in quite some")
-        predict.word("After the ice bucket challenge Louis will push his long wet hair out of his eyes with his little")
-        predict.word("Be grateful for the good times and keep the faith during the")
-        predict.word("If this isn't the cutest thing you've ever seen, then you must be")
+    # If we still have not enough candidates, choose from 1-grams
+    # context-free, that is without taking the prefix in the consideration.
+    candidates.found <- nrow(candidates)
+    if (candidates.found < n) {
+        table.ngram.1 <- ngram.optimize.cache(1, threshold = threshold[1],
+                                              removeStopwords = removeStopwords)
+        table.candidates.1 <- table.ngram.1 %>%
+            filter(!(Suffix %in% candidates$Suffix))
+        if (!is.null(word.pattern)) {
+            table.candidates.1 <- table.candidates.1 %>%
+                filter(grepl(word.pattern, Suffix))
+        }
+        table.candidates.1 <- table.candidates.1 %>%
+            transmute(Prefix = "",
+                      Suffix = Suffix,
+                      N = 0,
+                      Prob = Prob,
+                      Score = exp(Prob / 1000000 + 4 * log(0.4))) %>%
+            head(n - candidates.found)
+        
+        candidates <- rbind(candidates, table.candidates.1)
     }
     
-# }
+    if (nrow(candidates) == 0 && !is.na(word.pattern)) {
+        word.pattern.clean <- gsub("[^a-zA-Z]", "", word.pattern)
+        suggestions <- hunspell_suggest(word.pattern.clean)
+        suggestions.length <- length(suggestions[[1]])
+        if (suggestions.length >= 1) {
+            candidates <- data.frame(Prefix = "",
+                                     Suffix = suggestions[[1]],
+                                     N = 0,
+                                     Prob = 0,
+                                     Score = 1e-10 * (suggestions.length : 1))
+        }
+    }
+    
+    candidates %>%
+        arrange(desc(Score)) %>%
+        head(n) %>%
+        mutate_if(is.factor, as.character)
+}
 
-
+#
+# Returns predicted candidate words following the specified text.
+#
+# The prediction algorithm optionally supports predicting partially entered
+# words, if the argument predict.partial is TRUE. If this is the case, we check
+# if the text ends with a space character or not. If the last character is not
+# the space, we assume that the last word is entered only partially and attempt
+# to predict the ending of this word, using all preceding words as a prefix.
+#
+# The returned data frame contains the following columns:
+#
+# * Prefix - the text prefix used for prediction.
+# * Suffix - the predicted next word.
+# * N - the n parameter of n-gram used for this prediction.
+# * Prob - the column "Prob" from the n-gram table used for this prediction.
+# * Score - the score of this prediction. Score is not necessary a probability
+#       (scores do not sum to 1), but a higher score implies a higher
+#       probability.
+#
+# The returned data frame is sorted by score in the descending order, so that
+# the higher-scored (and thus higher-probability) candidates are on top.
+# 
+# @param text the text to predict the next word for.
+# @param predict.partial if TRUE, predict partially entered words.
+# @param n number of candidates to return. Defaults to 5.
+# @param threshold the minimum number of n-gram occurencies to use for
+#       prediction. Defaults to 5.
+# @param removeStopwords TRUE to use n-grams with removed stop words.
+#       Defaults to FALSE.
+#
+# @return the data frame with predicted candidates.
+#
+sb.predict.text <- function(text, predict.partial = FALSE, n = 5, threshold = 5, removeStopwords = FALSE) {
+    use.pattern <- predict.partial && !(substring(text, nchar(text)) %in% c("", " "))
+    
+    word.pattern <- NULL
+    if (use.pattern) {
+        # Split the last word.
+        splitted <- strsplit(text, "\\s+(?=[^\\s]+$)", perl = TRUE)
+        splitted.length = length(splitted[[1]])
+        if (splitted.length > 1) {
+            text <- splitted[[1]][1]
+            word.pattern <- paste0("^", splitted[[1]][2])
+        } else if (splitted.length == 1) {
+            text <- ""
+            word.pattern <- paste0("^", splitted[[1]][1])
+        }
+    }
+    
+    prefix.tokens <-
+        preprocess.text.predict(text, removeStopwords = removeStopwords)
+    sb.predict(
+        prefix.tokens,
+        word.pattern = word.pattern,
+        n = n,
+        threshold = threshold,
+        removeStopwords = removeStopwords
+    )
+}

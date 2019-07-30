@@ -79,7 +79,7 @@ ngram.build.n <- function(text, n) {
     # Define help functions
     
     # Load top stems to keep.
-    stems.top <- stems.top.cache()$Terms
+    stems.top <- stems.top.cache()
     
     # Keep the word, if it is included in the table with top stems.
     # Otherwise, replaces the word with the specified token.
@@ -242,8 +242,7 @@ stems.top.build <- function(removeStopwords = FALSE) {
     # The token STOS is already included in stems, so we must make place
     # only for the token UNK, that is we may encode (256 * 256 - 2) top
     # stems.
-    data.frame(Terms = stems.freq$Terms[1:(256 * 256 - 1)]) %>%
-        mutate_if(is.factor, as.character)
+    stems.freq$Terms[1:(256 * 256 - 1)]
 }
 
 #

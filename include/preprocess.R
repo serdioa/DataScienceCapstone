@@ -193,17 +193,29 @@ preprocess.addSentenceTokens <- function(tokens) c("STOS", tokens)
 # top-frequency stems. Otherwise, replaces the word with the special token "UNK"
 # (Unknown).
 #
-# @param 
+# @param stem the word stem.
+# @param stems.freq.top the character vector with high-frequency stems to keep.
+#
+# @return the specified stem, if it is included in stems.freq.top, or the token
+#       "UNK" (Unknown) otherwise.
 #
 preprocess.top.stem.keep <- function(stem, stems.freq.top) {
     ifelse(is.na(fmatch(stem, stems.freq.top)), "UNK", stem)
 }
 
+#
 # Stem the specified token, transform it to the lower case, and
-# replace with the UNK token if it is not in the list of top stems.
-preprocess.stem.word <- function(x, stems.freq.top) {
-    ifelse(x == "STOS", x, 
-           preprocess.top.stem.keep(SnowballC::wordStem(tolower(x), language = "en"),
+# replace with the token "UNK" (Unknown) if it is not in the list of top stems.
+#
+# @param word the token (word) to process.
+# @param stems.freq.top the character vector with high-frequency stems to keep.
+#
+# @return the stem of the specified word, if it is included in stems.freq.top,
+#       or the token "UNK" (Unknown) otherwise.
+preprocess.stem.word <- function(word, stems.freq.top) {
+    ifelse(word == "STOS", word, 
+           preprocess.top.stem.keep(SnowballC::wordStem(tolower(word),
+                                                        language = "en"),
                                     stems.freq.top))
 }
 
