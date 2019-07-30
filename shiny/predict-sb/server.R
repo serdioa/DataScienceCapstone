@@ -85,7 +85,7 @@ shinyServer(function(input, output, session) {
             }
         }
         
-        prefix.tokens <- preprocess.text(text)
+        prefix.tokens <- preprocess.text.predict(text)
         sb.predict(prefix.tokens, word.pattern, n)
     }
     
@@ -103,7 +103,7 @@ shinyServer(function(input, output, session) {
                                  SuffixProb = numeric(),
                                  Score = numeric())
         
-        # Choose candidates from 5- to 2-grms.
+        # Choose candidates from 5- to 2-grams.
         # 1-grams (context-free prediction which completely ignores the prefix)
         # are used only as the last resort if not enough candidates are found.
         for (i in 4:1) {
@@ -185,7 +185,7 @@ shinyServer(function(input, output, session) {
     
     # Pre-process text before predicting next word based on the text.
     # Returns character vector with words.
-    preprocess.text <- function(data.text) {
+    preprocess.text.predict <- function(data.text) {
         # Split the text on sentences and keep only the last one.
         data.sentences <- unlist(tokenizers::tokenize_sentences(data.text))
         data.sentences.length <- length(data.sentences)
@@ -203,7 +203,7 @@ shinyServer(function(input, output, session) {
         
         tokens <- preprocess.tokenize(text)
         tokens <- preprocess.replaceWords(tokens)
-        tokens <- preprocess.removeNonEnglish(tokens)
+        tokens <- preprocess.removeNonLatin(tokens)
         tokens <- preprocess.stem.word(tokens)
         tokens <- preprocess.addSentenceTokens(tokens)
 
@@ -291,7 +291,7 @@ shinyServer(function(input, output, session) {
                preprocess.top.stem.keep(SnowballC::wordStem(tolower(x), language = "en")))
     }
 
-    preprocess.removeNonEnglish <- function(tokens) {
+    preprocess.removeNonLatin <- function(tokens) {
         # Valid characters:
         # * A-Z, a-z
         # * Extended Latin (accented): \u00c0 - \u00ff
