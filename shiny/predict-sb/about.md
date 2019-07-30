@@ -69,7 +69,7 @@ Our model attempts to predict the last word (suffix) based on previous 4 words
 prefix *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*, the suffix *w<sub>n</sub>*, as well as the empirical conditional
 probability of suffix given prefix *P<sub>E</sub>(w<sub>n</sub> | w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>)*.
 
-The prediction algorithm consists of 2 steps: choosing candidates, and ranking
+The prediction algorithm consists of 2 steps: choosing candidates, and scoring
 candidates to select the best matches.
 
 Performance tests demonstrated that we may use a very simple choosing algorithm:
@@ -77,17 +77,17 @@ given the prefix *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*, we choose
 with the 4-gram prefix *w<sub>n-4</sub>, w<sub>n-3</sub>, w<sub>n-2</sub>, w<sub>n-1</sub>*, all 4-grams starting
 with the 3-gram prefix *w<sub>n-3</sub>, w<sub>n-2</sub>, w<sub>n-1</sub>* and so on.
 
-The ranking algorithm selects best N matches from all candidates by calculating
-a numerical rank of each candidate and choosing N candidates with top rank.
-The rank may be a probability, but it may be a different type of a numerical
+The scoring algorithm selects best N matches from all candidates by calculating
+a numerical score of each candidate and choosing N candidates with top score.
+The score may be a probability, but it may be a different type of a numerical
 quantifier, as it is the case for the Stupid Backoff algorithm.
 
-The Stupid Backoff algorithm is a high-efficient ranking
+The Stupid Backoff algorithm is a high-efficient scoring
 algorithm proposed in 2007 by Thorsten Brants et al [(2)](#stupid_backoff).
 On large data sets the
-algorithm gives ranking close to [Kneser-Ney algorithm](https://en.wikipedia.org/wiki/Kneser%E2%80%93Ney_smoothing),
+algorithm gives scoring close to [Kneser-Ney algorithm](https://en.wikipedia.org/wiki/Kneser%E2%80%93Ney_smoothing),
 but is significantly faster. The Stupid Backoff algorithm returns not
-probabilities, but relative ranks of words (they do not sum to 1), which is
+probabilities, but relative scores of words (they do not sum to 1), which is
 sufficient for our purposes.
 
 The Stupid Backoff algorithm is described by the following formula:
@@ -104,11 +104,12 @@ of the word *w<sub>n</sub>* given preceding words *w<sub>1</sub>, w<sub>2</sub>,
 Stupid Backoff algorithm recommend to use *&lambda;* = 0.4.
 
 In other words, first we attempt to look up the n-gram in the table for the
-largest n available. If the n-gram is found, than the rank of the last word
-is the empirical conditional probability of the last word given the prefix. Otherwise,
-we back off (hence the algorithm name) to a table with (n-1)-grams, do the same
-calculations and multiply the result by &lambda; = 0.4. If the shorterned prefix
-is not found as well, the recursion goes deeper, concluding on 1-grams.
+largest n available. If the n-gram is found, than the score of the last word is
+the empirical conditional probability of the last word given the prefix.
+Otherwise, we back off (hence the algorithm name) to a table with (n-1)-grams,
+do the same calculations and multiply the result by &lambda; = 0.4. If the
+shorterned prefix is not found as well, the recursion goes deeper, concluding on
+1-grams.
 
 # <a name="optimization"></a>Optimization
 
@@ -154,7 +155,7 @@ The R type "integer" require only 4 bytes, and we are storing logarithm with
 
 By using all optimization techniques mentioned above, we were able to reduce the
 memory required to keep n-gram tables to 53.5 MB (12 MB in compressed RDS
-format). The average time required to predict 10 top-ranking candidates was
+format). The average time required to predict 10 top-scoring candidates was
 under 20 ms on our hardware.
 
 # <a name="extensions"></a>Extensions
@@ -278,7 +279,7 @@ formal of the sources, where people often prefer brevity to correctness.
 The application GUI provides the following elements:
 
 * Text area: start entering the text there, and predicted words will appear
-on the chart below. The chart shows all words ordered by rank, providing a
+on the chart below. The chart shows all words ordered by score, providing a
 visual clue on how probable each candidate is. When "Predict partially entered
 words" is activated, **you have to type the space character to predict the next
 word**, otherwise an ending of the current word is predicted.
