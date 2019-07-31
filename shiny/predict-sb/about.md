@@ -65,17 +65,22 @@ of the algorithm.
 The training corpus was used to build 1- to 5-grams. Each n-gram was further
 split on a (n-1)-gram prefix (empty for 1-grams) and a single-word suffix.
 Our model attempts to predict the last word (suffix) based on previous 4 words
-(prefix). For each n-gram *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n</sub>* we store in a lookup table the
-prefix *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*, the suffix *w<sub>n</sub>*, as well as the empirical conditional
-probability of suffix given prefix *P<sub>E</sub>(w<sub>n</sub> | w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>)*.
+(prefix). For each n-gram *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n</sub>*
+we store in a lookup table the prefix
+*w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*, the suffix
+*w<sub>n</sub>*, as well as the empirical conditional probability of suffix
+given prefix
+*P<sub>E</sub>(w<sub>n</sub> | w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>)*.
 
 The prediction algorithm consists of 2 steps: choosing candidates, and scoring
 candidates to select the best matches.
 
 Performance tests demonstrated that we may use a very simple choosing algorithm:
-given the prefix *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*, we choose all 5-grams starting
-with the 4-gram prefix *w<sub>n-4</sub>, w<sub>n-3</sub>, w<sub>n-2</sub>, w<sub>n-1</sub>*, all 4-grams starting
-with the 3-gram prefix *w<sub>n-3</sub>, w<sub>n-2</sub>, w<sub>n-1</sub>* and so on.
+given the prefix *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*, we choose
+all 5-grams starting with the 4-gram prefix
+*w<sub>n-4</sub>, w<sub>n-3</sub>, w<sub>n-2</sub>, w<sub>n-1</sub>*,
+all 4-grams starting with the 3-gram prefix
+*w<sub>n-3</sub>, w<sub>n-2</sub>, w<sub>n-1</sub>* and so on.
 
 The scoring algorithm selects best N matches from all candidates by calculating
 a numerical score of each candidate and choosing N candidates with top score.
@@ -99,9 +104,11 @@ if *P<sub>E</sub>(w<sub>n</sub> | w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</
 
 * *&lambda; SB(w<sub>n</sub> | w<sub>2</sub>, ..., w<sub>n-1</sub>)* otherwise,
 
-where *P<sub>E</sub>(w<sub>n</sub> | w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>)* is the empirical conditional probability
-of the word *w<sub>n</sub>* given preceding words *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*. Authors of the
-Stupid Backoff algorithm recommend to use *&lambda;* = 0.4.
+where
+*P<sub>E</sub>(w<sub>n</sub> | w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>)*
+is the empirical conditional probability of the word *w<sub>n</sub>* given
+preceding words *w<sub>1</sub>, w<sub>2</sub>, ..., w<sub>n-1</sub>*.
+Authors of the Stupid Backoff algorithm recommend to use *&lambda;* = 0.4.
 
 In other words, first we attempt to look up the n-gram in the table for the
 largest n available. If the n-gram is found, than the score of the last word is
@@ -116,25 +123,25 @@ shorterned prefix is not found as well, the recursion goes deeper, concluding on
 In our implementation of the Stupid Backoff algorithm we have applied several
 optimizations to reduce the memory usage and latency.
 
-* In prefixes of n-grams we use only 2<sup>16</sup> - 2 words (stems) which appear in the
-training text corpus most often. These words cover 99.4% of the corpora.
-Words not included in the top list are replaced with a special token UNK
-("Unknown") when appear in n-gram prefixes. This optimization applies only to
-prefixes, the last word of each n-gram remains "as is".
+* In prefixes of n-grams we use only 2<sup>16</sup> - 2 words (stems) which
+appear in the training text corpus most often. These words cover 99.4% of the
+corpora. Words not included in the top list are replaced with a special token
+UNK ("Unknown") when appear in n-gram prefixes. This optimization applies only
+to prefixes, the last word of each n-gram remains "as is".
 
-* Using 2^16 - 2 stems allows us to encode each stem, as well as 2 special tokens,
-using 2 bytes. One of the special tokens is mentioned above UNK token, another
-is the STOS ("Start-Of-Sentence") token.
+* Using 2^16 - 2 stems allows us to encode each stem, as well as 2 special
+tokens, using 2 bytes. One of the special tokens is mentioned above UNK token,
+another is the STOS ("Start-Of-Sentence") token.
 
 * R is not especially rich on low-level data types. It provides a "raw" type
-which claims to work with bytes, but this type is very storage-inefficient.
-We have to use available primitive data types "integer" and "numeric" to encode n-gram
-prefixes. R stores the "integer" data type using 4 bytes, and we have used
-it to encode 1- and 2-stem prefixes. The "numeric" data type has 8 bytes, and
-we have encoded 3- and 4-stem prefixes in it. Using binary encoding allows to
-noticeably reduce memory for storing n-grams. For example, for 5-grams (prefix
-length 4), we require 3.5 GB when using plain-text n-grams, but only 834 MB
-when using binary encoding, reducing memory usage by 76.5%.
+which claims to work with bytes, but this type is very storage-inefficient. We
+have to use available primitive data types "integer" and "numeric" to encode
+n-gram prefixes. R stores the "integer" data type using 4 bytes, and we have
+used it to encode 1- and 2-stem prefixes. The "numeric" data type has 8 bytes,
+and we have encoded 3- and 4-stem prefixes in it. Using binary encoding allows
+to noticeably reduce memory for storing n-grams. For example, for 5-grams
+(prefix length 4), we require 3.5 GB when using plain-text n-grams, but only 834
+MB when using binary encoding, reducing memory usage by 76.5%.
 
 * We may further reduce memory requirements by removing seldom n-grams, that is
 n-grams which appear K times or less. Our tests demonstrated that we get the
@@ -186,8 +193,8 @@ As you may remember from the [Implementation](#implementation), we have
 preserved 20% of the data for an off-sample validation test. The test was done
 as follows:
 
-* Choose 100.000 random sample sentences from each source (blogs, news, Twitter).
-Split each selection on 100 samples, each of 1000 sentences.
+* Choose 100.000 random sample sentences from each source (blogs, news,
+Twitter). Split each selection on 100 samples, each of 1000 sentences.
 
 * Create an aggregated test set of 100.000 sentences by choosing 1/3 of
 sentences from each source.
