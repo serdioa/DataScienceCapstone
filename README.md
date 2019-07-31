@@ -12,4 +12,4 @@ in mobile phones to assist typing.
 Project progress reports available on [GitHub pages](https://serdioa.github.io/DataScienceCapstone):
 
 * [Milestone Report](https://serdioa.github.io/DataScienceCapstone/MilestoneReportWeek2.html)
-* [Testing and Tuning](https://serdioa.github.io/DataScienceCapstone/TestingAndTuning.html)
+* [Implementation Report](https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html)
