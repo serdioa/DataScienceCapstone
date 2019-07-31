@@ -19,7 +19,9 @@ for mobile devices.
 
 Application: https://serdioa.shinyapps.io/sb-predict
 
-Find source code and more on GitHube site: https://github.com/serdioa/DataScienceCapstone
+Documentation: https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html
+
+Source code and more on GitHube site: https://github.com/serdioa/DataScienceCapstone
 
 Algorithm
 ========================================================
@@ -36,9 +38,9 @@ algorithm. A simple extension allows to predict partially entered words as the
 user types them.
 
 Off-sample tests show that our algorithm correctly predicts the next
-word in 15.39% of cases, 95%&nbsp;conf. interval (15.14%,&nbsp;15.65%). The correct
-word is amongst top 3 predictions in 25.04% of cases, 95%&nbsp;conf. interval
-(24.78%,&nbsp;25.30%).
+word in 15.40   % of cases, 95%&nbsp;conf. interval (15.15%,&nbsp;15.65%).
+The correct word is amongst top 3 predictions in 25.00% of cases, 95%&nbsp;conf.
+interval (24.73,&nbsp;25.26).
 
 Application
 ========================================================
