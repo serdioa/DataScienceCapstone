@@ -7,12 +7,17 @@ library(progress)
 library(readr)
 library(tokenizers)
 
-source("include/predict.sb.R")
+source("include/ngram.predict.R")
 
 #
 # Load testing data.
-# The source could be "blogs", "news", "twitter".
-# The type could be "testing" or "validation".
+#
+# @param source the source of the testing data, shall be one of "blogs", "news",
+#       "twitter".
+# @param type the type of the testing data, shall be one of "training",
+#       "testing", "validation".
+#
+# @return the character vector with the testing data.
 #
 predict.test.text.load <- function(source, type) {
     source.valid <- c("blogs", "news", "twitter")
@@ -20,7 +25,7 @@ predict.test.text.load <- function(source, type) {
         stop("Invalid source: ", source)
     }
     
-    type.valid <- c("testing", "validation")
+    type.valid <- c("training", "testing", "validation")
     if (!(type %in% type.valid)) {
         stop("Invalid type: ", type)
     }
@@ -39,8 +44,13 @@ predict.test.text.load <- function(source, type) {
 # of the provided text separated by whitespace characters. In addition, any
 # punctuation characters directly before or after the suffix are removed.
 #
-predict.test.build.samples.intern <- function(text, n, prefix.min.tokens = 5,
-                                              preprocess.suffix = FALSE) {
+# @param text the character vector to build samples from.
+# @param n the number of samples to build.
+# @param prefix.min.tokens the minimum number of tokens in the prefix.
+#
+# @return the data frame with prepared samples.
+#
+predict.test.build.samples.intern <- function(text, n, prefix.min.tokens = 5) {
     text.length <- length(text)
     
     message("Tokenizing text")
@@ -67,8 +77,7 @@ predict.test.build.samples.intern <- function(text, n, prefix.min.tokens = 5,
             split.index <- sample((prefix.min.tokens + 1) : sentence.length, 1)
             sample.suffix.i <- tail(sentence.tokens, -(split.index - 1))
 
-            sample.suffix.i <- predict.test.preprocess.suffix(sample.suffix.i,
-                                                              heavy = preprocess.suffix)
+            sample.suffix.i <- predict.test.preprocess.suffix(sample.suffix.i)
             
             # If there is no suffix left, skip this sample.
             if (is.na(sample.suffix.i)) {
@@ -89,34 +98,28 @@ predict.test.build.samples.intern <- function(text, n, prefix.min.tokens = 5,
     close(pb)
     
     data.frame(Prefix = as.character(sample.prefix),
-               Suffix = as.character(sample.suffix))
+               Suffix = as.character(sample.suffix),
+               stringsAsFactors = FALSE)
 }
 
+#
+# Pre-processes the suffix of a test sample.
+#
 # We keep the prefix "as is", with all the troublesome characters,
-# but we may pre-process the suffix (the word to be predicted)
-# if requested, because we even do not attempt to predict some
-# tokens. Precision of prediction with and without pre-processing
-# is useful: the first shows how good our algorithm is when running
-# on a real-life text, the second shows how good our algorithm is
-# in performing on words which it is expected to predict at all.
+# but we pre-process the suffix (the word to be predicted). For example, we
+# do not attempt to predict the punctuation. If the next token is produced
+# simply by splitting the text by space characters, punctuation characters such
+# as a point or a comma are not separated from the previous word, and we got
+# a token which consists of a word and the following point or a comma. This
+# function removes such punctuation characters and other similar cases.
 #
-# If the algorithm demonstrates bad performance on pre-processed suffixes,
-# that is on words it was programmed to predict, than the algorithm is bad
-# in what it was intended to do. On the other hand, if the algorithm is good
-# on pre-processed suffixes, but bad on a real-life text, that means that our
-# assumptions on what the algorithm should attempt to predict are wrong.
+# @param suffix the suffix to pre-process.
 #
-# We distinguish between a mandatory pre-processing of the suffix, and the
-# heavy pre-processing. The mandatory pre-processing is applied always, and
-# it prevents down-grading the algoritihm if, for example, it does not predict
-# punctuation marks.
-predict.test.preprocess.suffix <- function(suffix, heavy = FALSE, verbose = FALSE) {
-    if (heavy) {
-        suffix <- preprocess.removeUrl(suffix)
-        suffix <- preprocess.removeEmail(suffix)
-        suffix <- preprocess.removeTagsAndHandles(suffix)
-        suffix <- preprocess.removeUnderscores(suffix)
-    }
+# @return the pre-processed suffix, or NA if after all the pre-processing
+#       the suffix is empty (for example, if the provided suffix was just a
+#       punctuation character).
+#
+predict.test.preprocess.suffix <- function(suffix, verbose = FALSE) {
     suffix <- preprocess.addMissingSpace(suffix)
     if (verbose) {
         message("preprocess(1)")
@@ -129,21 +132,8 @@ predict.test.preprocess.suffix <- function(suffix, heavy = FALSE, verbose = FALS
     suffix.empty <- grepl("^\\s*$", suffix)
     suffix <- suffix[!suffix.empty]
     
-    if (heavy) {
-        tokens <- unlist(preprocess.tokenize(suffix))
-    } else {
-        tokens <- unlist(tokenize_regex(suffix))
-    }
-    if (verbose) {
-        message("preprocess(2)")
-        print(tokens)
-    }
-    
-    if (heavy) {
-        tokens <- preprocess.replaceWords(tokens)
-        tokens <- preprocess.removeNonEnglish(tokens)
-    }
-    
+    tokens <- unlist(tokenize_regex(suffix))
+
     # Remove tokens which contains only punctuation marks.
     tokens.punctuation.idx <- grepl("^[,.!?()\":;”…-]+$", tokens)
     tokens <- tokens[!tokens.punctuation.idx]
@@ -152,32 +142,48 @@ predict.test.preprocess.suffix <- function(suffix, heavy = FALSE, verbose = FALS
     # Remove them.
     tokens.empty <- grepl("^\\s*$", tokens)
     tokens <- tokens[!tokens.empty]
-    if (verbose) {
-        message("preprocess(3)")
-        print(tokens)
-    }
-    
+
     ifelse(length(tokens) > 0, tokens[1], NA)
 }
 
+#
 # Builds samples to test prediction from the specified text.
+# See predict.test.build.samples.intern() for the detailed description.
+#
+# @param source the source of the testing data, shall be one of "blogs", "news",
+#       "twitter".
+# @param type the type of the testing data, shall be one of "training",
+#       "testing", "validation".
+# @param n the number of samples to build.
+# @param prefix.min.tokens the minimum number of tokens in the prefix.
+#
+# @return the data frame with prepared samples.
+#
 predict.test.build.samples.source <- function(source, type, n,
-                                              prefix.min.tokens = 5,
-                                              preprocess.suffix = FALSE) {
-        text <- predict.test.text.load(source, type)
-        samples <- predict.test.build.samples.intern(text, n = n,
-                                                     prefix.min.tokens = prefix.min.tokens,
-                                                     preprocess.suffix = preprocess.suffix) %>%
-            mutate(Source = source) %>%
-            mutate_if(is.factor, as.character)
-        
-        samples
-    }
+                                              prefix.min.tokens = 5) {
+    text <- predict.test.text.load(source, type)
+    samples <- predict.test.build.samples.intern(text, n = n,
+                                                 prefix.min.tokens = prefix.min.tokens) %>%
+        mutate(Source = source) %>%
+        mutate_if(is.factor, as.character)
+    
+    samples
+}
 
+#
 # Builds samples to test prediction from the specified text, or from all texts
-# if the source = "all".
-predict.test.build.samples <- function(source, type, n, prefix.min.tokens = 5,
-                                       preprocess.suffix = FALSE) {
+# See predict.test.build.samples.intern() for the detailed description.
+#
+# @param source the source of the testing data, shall be one of "blogs", "news",
+#       "twitter", or "all".
+# @param type the type of the testing data, shall be one of "training",
+#       "testing", "validation".
+# @param n the number of samples to build.
+# @param prefix.min.tokens the minimum number of tokens in the prefix.
+#
+# @return the data frame with prepared samples.
+#
+predict.test.build.samples <- function(source, type, n, prefix.min.tokens = 5) {
     if (source == "all") {
         # R do not have out-of-the-box function to split an integer on
         # approximately equal parts, so we have to use a simple ad-hoc solution
@@ -188,54 +194,40 @@ predict.test.build.samples <- function(source, type, n, prefix.min.tokens = 5,
         
         # Get the required number of samples.
         samples.blogs <- predict.test.build.samples.source("blogs", type, n.blogs,
-                                                           prefix.min.tokens = prefix.min.tokens,
-                                                           preprocess.suffix = preprocess.suffix)
+                                                           prefix.min.tokens = prefix.min.tokens)
         samples.news <- predict.test.build.samples.source("news", type, n.news,
-                                                           prefix.min.tokens = prefix.min.tokens,
-                                                           preprocess.suffix = preprocess.suffix)
+                                                           prefix.min.tokens = prefix.min.tokens)
         samples.twitter <- predict.test.build.samples.source("twitter", type, n.twitter,
-                                                           prefix.min.tokens = prefix.min.tokens,
-                                                           preprocess.suffix = preprocess.suffix)
+                                                           prefix.min.tokens = prefix.min.tokens)
         samples <- rbind(samples.blogs, samples.news, samples.twitter)
         
         # Shuffle the samples.
         sample_n(samples, nrow(samples))
     } else {
         predict.test.build.samples.source(source, type, n,
-                                          prefix.min.tokens = prefix.min.tokens,
-                                          preprocess.suffix = preprocess.suffix)
+                                          prefix.min.tokens = prefix.min.tokens)
     }
 }
 
-predict.test.cache.samples <- function(source, type, n, prefix.min.tokens = 5,
-                                       preprocess.suffix = FALSE) {
-    samples.file.name <- file.path("cache",
-                                   paste0("samples.", source, ".", type, ".",
-                                          preprocess.suffix, ".RDS"))
-    if (file.exists(samples.file.name)) {
-        message("Loading samples (", source, ", ", type, ") from ", samples.file.name)
-        readRDS(samples.file.name)
-    } else {
-        samples <- predict.test.build.samples(source, type, n, prefix.min.tokens = prefix.min.tokens,
-                                              preprocess.suffix = preprocess.suffix)
-        
-        # message("Saving samples (", source, ", ", type, ") into ", samples.file.name)
-        # saveRDS(samples, samples.file.name)
-        
-        samples
-    }
-}
-
-predict.test.cache.samples.all <- function() {
-    predict.test.cache.samples("blogs", "testing", 1000000)
-    predict.test.cache.samples("news", "testing", 1000000)
-    predict.test.cache.samples("twitter", "testing", 1000000)
-    
-    predict.test.cache.samples("blogs", "validation", 1000000)
-    predict.test.cache.samples("news", "validation", 1000000)
-    predict.test.cache.samples("twitter", "validation", 1000000)
-}
-
+#
+# Tests the given prediction algorithm on the specified samples.
+# The samples must be a data frame with the columns "Prefix" and "Suffix".
+# The algorithm must be a function which accepts a single character parameter - 
+# the prefix, and returns the table with predicted suffixes.
+#
+# Returns a data frame created from samples by appending columns "Predicted.1"
+# to "Predicted.10", "Score.1" to "Score.10" and "Match.Index".
+#
+# The columns "Predicted.N" and "Score.N" contain predicted next words and their
+# score as returned by the algorithm. The column "Match.Index" contains the
+# index of the correct prediction, or NA if none of predictions returned by the
+# algorithm matches the prefix of the sample.
+#
+# @param samples the data frame with samples.
+# @param algo the algorithm to test.
+#
+# @return the data frame with results.
+#
 predict.test.algo <- function(samples, algo) {
     samples.length <- nrow(samples)
     
@@ -260,8 +252,8 @@ predict.test.algo <- function(samples, algo) {
                             Score.9 = numeric(samples.length),
                             Predicted.10 = character(samples.length),
                             Score.10 = numeric(samples.length),
-                            Match.Index = as.integer(rep(NA, samples.length))) %>%
-        mutate_if(is.factor, as.character)
+                            Match.Index = as.integer(rep(NA, samples.length)),
+                            stringsAsFactors = FALSE)
 
     message("Running prediction algorithm on ", samples.length, " samples")
     
@@ -302,35 +294,54 @@ predict.test.algo <- function(samples, algo) {
     cbind(samples, predicted)
 }
 
-predict.test.sb <- function(source, type, n.samples = 100,
-                            preprocess.suffix = FALSE,
+#
+# Tests the Stupid Backoff algorithm.
+#
+# @param source the source of the testing data, shall be one of "blogs", "news",
+#       "twitter", or "all".
+# @param type the type of the testing data, shall be one of "training",
+#       "testing", "validation".
+# @param n.samples the number of test samples.
+# @param threshold the minimum number of n-gram occurencies to use for
+#       prediction. Defaults to 5.
+# @param removeStopwords TRUE to use n-grams with removed stop words.
+#       Defaults to FALSE.
+#
+# @return the data frame with results.
+#
+predict.test.sb.build <- function(source, type, n.samples = 100,
                             threshold = 5, removeStopwords = FALSE) {
-    samples <- predict.test.cache.samples(source, type, n.samples,
-                                          preprocess.suffix = preprocess.suffix)
-    
+    samples <- predict.test.build.samples(source, type, n.samples)
+
     algo <- function(x) sb.predict.text(x, n = 10, threshold = threshold,
                                         removeStopwords = removeStopwords)
     
     predict.test.algo(samples, algo)
 }
 
+#
+# Caches results of testing the Stupid Backoff algorithm.
+#
+# @param source the source of the testing data, shall be one of "blogs", "news",
+#       "twitter", or "all".
+# @param type the type of the testing data, shall be one of "training",
+#       "testing", "validation".
+# @param n.samples the number of test samples.
+# @param threshold the minimum number of n-gram occurencies to use for
+#       prediction. Defaults to 5.
+# @param removeStopwords TRUE to use n-grams with removed stop words.
+#       Defaults to FALSE.
+#
+# @return the data frame with results.
+#
 predict.test.sb.cache <- function(source, type, n.samples = 100,
-                                  preprocess.suffix = FALSE,
                                   threshold = 5, removeStopwords = FALSE) {
-    threshold.collapsed <- paste0(threshold, collapse = "")
-    file.name <- file.path("cache", paste0("predicted.", source, ".", type, ".", n.samples,
-                       ".prep-", preprocess.suffix, ".thr-", threshold.collapsed,
-                       ".remsw-", removeStopwords, ".RDS"))
-    if (file.exists(file.name)) {
-        message("Loading predicted results from ", file.name)
-        # readRDS(file.name)
-    } else {
-        message("Predicting results for ", file.name)
-        predicted <- predict.test.sb(source, type, n.samples, preprocess.suffix,
-                                     threshold, removeStopwords)
-        message("Saving predicted results to ", file.name)
-        saveRDS(predicted, file.name)
-        #    predicted
-    }
-}
     
+    threshold.collapsed <- paste0(threshold, collapse = "")
+    var.name <- paste0("predict.test.sb.", source, ".", type, ".", n.samples,
+                       ".thr-", threshold.collapsed)
+    var.build <- function() predict.test.sb.build(source, type, n.samples,
+                                     threshold, removeStopwords)
+    
+    get.var.cache(var.name, var.build, removeStopwords)
+}
