@@ -12,5 +12,6 @@ in mobile phones to assist typing.
 Project progress reports available on [GitHub pages](https://serdioa.github.io/DataScienceCapstone):
 
 * [Milestone Report](https://serdioa.github.io/DataScienceCapstone/MilestoneReportWeek2.html)
-* [Implementation Report](https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html)
+* [Implementation Report - full version](https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html)
+* [Implementation Report - short version](https://serdioa.github.io/DataScienceCapstone/ImplementationReportShort.html)
 * [Presentation](https://serdioa.github.io/DataScienceCapstone/presentation/index.html)
