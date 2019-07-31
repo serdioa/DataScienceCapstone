@@ -13,3 +13,4 @@ Project progress reports available on [GitHub pages](https://serdioa.github.io/D
 
 * [Milestone Report](https://serdioa.github.io/DataScienceCapstone/MilestoneReportWeek2.html)
 * [Implementation Report](https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html)
+* [Presentation](https://serdioa.github.io/DataScienceCapstone/presentation/index.html)
