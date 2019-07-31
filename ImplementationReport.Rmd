@@ -17,6 +17,9 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Building n-grams](#building_n_grams)
 * [Binary encoding for stems](#binary_encoding)
 * [Optimizing n-gram tables](#optimizing_tables).
+* [Stupid Backoff algorithm](#stupid_backoff_algorithm)
+* [Testing algorithm](#testing_algorithm)
+* [Optimizing meta-parameters](#optimizing_meta_parameters)
 * [References](#references)
 
 # <a name="synopsis"></a>Synopsis
@@ -643,15 +646,616 @@ kable(stat.ngram.opt.prob.tbl,
     row_spec(6, bold = T, background = "#C0C0C0") %>%
     kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
                   full_width = FALSE)
-
 ```
 
 The total memory usage is still above our maximum allowed size of 1 GB.
 To achieve it, we have to find another ways to reduce the tables with n-grams.
 But before we do it, let us discuss our prediction algorithm and run some tests.
 
+# <a name="stupid_backoff_algorithm"></a>Stupid Backoff algorithm
+
+The prediction algorithm used by our application consists of 2 steps:
+choosing candidates, and scoring candidates to select the best matches.
+
+We decided to use very simple choosing algorithm: we choose all available
+candidates, proceeding from 5-grams to 1-grams and skipping suffixes which we
+have already collected. More precisely, given the input text
+$w_1, w_2,\ldots,w_{n-1}$, we proceed as follows:
+
+* Choose 5-gram candidates which starts with the 4-gram prefix
+$w_{n-4}, w_{n-3}, w_{n-2}, w_{n-1}$.
+
+* Choose 4-gram candidates which starts with the 3-gram prefix
+$w_{n-3}, w_{n-2}, w_{n-1}$, *except* those which suffix already appeared
+in choosen 5-grams.
+
+* The same for 3- and 2-grams.
+
+* Our implementation allows to choose the number of candidates to show. If
+at this step we have found less candidates than requested, choose missing
+candudates from the most frequent 1-grams (remember, 1-grams do not have
+a prefix).
+
+Note that we do not stop once we have choosen the required number of candidates,
+but continue to n-grams for lower n. Suppose that we were requested to predict
+3 most probable words, and there are exactly 3 5-grams with the appropriate
+prefix. If we stop choosing candidates at this moment, we may miss 4-gram which
+produces a prediction with higher score than any 5-gram.
+
+The scoring algorithm selects best N matches from all candidates by calculating
+a numerical score of each candidate and choosing N candidates with top score.
+The score may be a probability, but it may be a different type of a numerical
+quantifier, as it is the case for the Stupid Backoff algorithm.
+
+The Stupid Backoff algorithm is a high-efficient scoring
+algorithm proposed in 2007 by Thorsten Brants et al [(2)](#stupid_backoff).
+On large data sets the
+algorithm gives scoring close to [Kneser-Ney algorithm](https://en.wikipedia.org/wiki/Kneser%E2%80%93Ney_smoothing),
+but is significantly faster. The Stupid Backoff algorithm returns not
+probabilities, but relative scores of words (they do not sum to 1), which is
+sufficient for our purposes.
+
+The Stupid Backoff algorithm is described by the following formula:
+
+$$SB(w_n|w_1, w_2,\ldots,w_{n-1}) = \begin{cases}
+P_{ML}(w_n|w_1, w_2,\ldots,w_{n-1}) \text{ if } P_{ML}(w_n|w_1, w_2,\ldots,w_{n-1}) > 0
+\\
+\lambda \; SB(w_n|w_2,\ldots,w_{n-1}) \text{ otherwise}
+\end{cases}$$
+
+where $P_{ML}(w_n|w_1, w_2,\ldots,w_{n-1})$ is the maximum likehood estimation
+of the conditional probability of the word $w_n$ given the prefix
+$w_1, w_2,\ldots,w_{n-1}$. Authors of the Stupid Backoff algorithm recommend to
+use $\lambda = 0.4$.
+
+In other words, first we attempt to look up the n-gram in the table for the
+largest n available. If the n-gram is found, than the score of the last word
+is the maximum likehood estimation of the conditional probability of the last
+word given the prefix. Otherwise, we back off (hence the algorithm name) to a
+table with (n-1)-grams, do the same calculations and multiply the result by
+$\lambda = 0.4$. If the shorterned prefix is not found as well, the recursion
+goes deeper, concluding on 1-grams.
+
+Note that our n-gram tables already contains the required maximum likehood
+estimation (MLE), so our calculation of the score is trivial:
+
+* If the choosen candidate is from the 5-gram table, return it's MLE as a score.
+
+* If the choosen candidate is from the 4-gram table, return it's MLE multiplied
+by $\lambda = 0.4$.
+
+* If the choosen candidate is from the 3-gram table, return it's MLE multiplied
+by $\lambda^2 = 0.4^2 = 0.16$.
+
+* The same for 2- and 1-grams, each time multiplying by $\lambda$ one more time.
+
+To better understand the algorithm, we will walk through an example. We want to
+predict the next word after the sequence "you pay to get".
+
+* We lookup up the 4-word prefix "you pay to get" in the table with 5-grams.
+We find there 3 matches, the score for each of them equals to the probability:
+
+```{r echo=FALSE, message=FALSE}
+predict.example.5 <- data.frame(
+  Prefix = rep("you pay to get", 3),
+  Suffix = c("in", "published", "there"),
+  Prob = c(0.5, 0.25, 0.25),
+  Score = c(0.5, 0.25, 0.25)
+)
+
+kable(predict.example.5,
+      booktabs = TRUE,
+      col.names = c("Prefix", "Suffix", "Probability", "Score"),
+      align=c("l", "l", "r", "r")) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+We add all these matches to the list of candidates.
+
+* We look up the 3-word prefix "pay to get" in the table with 4-grams. We find
+22 matches, the score for each of them equals the probability multiplied by
+$\lambda = 0.4$. The table below lists the top 5 of the candidates.
+
+```{r echo=FALSE, message=FALSE}
+predict.example.4 <- data.frame(
+  Prefix = rep("pay to get", 5),
+  Suffix = c("in", "the", "a", "my", "their"),
+  Prob = c(0.143, 0.114, 0.0857, 0.0857, 0.0571),
+  Score = c(0.143, 0.114, 0.0857, 0.0857, 0.0571) * 0.4
+)
+
+kable(predict.example.4,
+      booktabs = TRUE,
+      col.names = c("Prefix", "Suffix", "Probability", "Score"),
+      align=c("l", "l", "r", "r")) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+The first suffix, "in", is already in our list, since we have already found it
+in the table with 5-grams. The next suffix, "the", is not in our list yet, so
+we add it. We continue the same way for all 4-grams, adding suffixes which are
+not in our list yet.
+
+* Although we have already found 22 candidates, we continue to 3-grams, because
+it could happens that some 3-gram candidate will get a score high enough to get
+into the top list. We look up the 2-word prefix "to get" in the table with
+3-grams. We find more than 3000 matches, the score for each of them equals the probability multiplied by $\lambda^2 = 0.4^2 = 0.16$. The table below lists the top 5 of them.
+
+```{r echo=FALSE, message=FALSE}
+predict.example.3 <- data.frame(
+  Prefix = rep("to get", 5),
+  Suffix = c("a", "the", "to", "out", "back"),
+  Prob = c(0.0858, 0.0700, 0.0508, 0.0338, 0.0334),
+  Score = c(0.0858, 0.0700, 0.0508, 0.0338, 0.0334) * 0.16
+)
+
+kable(predict.example.3,
+      booktabs = TRUE,
+      col.names = c("Prefix", "Suffix", "Probability", "Score"),
+      align=c("l", "l", "r", "r")) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+We add to our lists candidates which are not present it in yet.
+
+* We repeat the same step with 2-grams, looking up 1-word prefix "get". We will
+find nearly 10.000 matches, the score for each of them equals the probability
+multiplied by $\lambda^3 = 0.4^3 = 0.064$. We add to our lists candidates which
+are not present it in yet.
+
+* If we already have enough candidates (which is the case, unless we want to
+find more than 10.000 top-score candidates), we do not need to get context-free
+candidates from the 1-grams table.
+
+* Suppose our goal is to find the top 10 candidates. We sort our list by score
+in the descending order, and select the top 10 rows:
+
+```{r echo=FALSE, message=FALSE}
+predict.example.all <- data.frame(
+  Prefix = c(rep("you pay to get", 3), rep("pay to get", 7)),
+  Suffix = c("in", "published", "there", "the", "a",
+  "my", "their", "out", "inside", "past"),
+  Prob = c(0.5000, 0.2500, 0.2500, 0.1142, 0.08571,
+           0.0857, 0.0571, 0.0571, 0.0285, 0.02857),
+  Score = c(0.5000, 0.2500, 0.2500, 0.0457, 0.0342,
+            0.0342, 0.0228, 0.0228, 0.0114, 0.0114)
+)
+
+kable(predict.example.all,
+      booktabs = TRUE,
+      col.names = c("Prefix", "Suffix", "Probability", "Score"),
+      align=c("l", "l", "r", "r")) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+```
+
+# <a name="testing_algorithm"></a>Testing algorithm
+
+Now we are ready to test our algorithm for predicting the next word using 20%
+of the data [we have saved for testing before](#download_and_split). We run
+tests for each data source, as well as for the aggregated data.
+
+* Choose 100.000 random sample sentences from each source (blogs, news,
+Twitter). Split each selection on 100 samples, each of 1000 sentences.
+
+* Create an aggregated test set of 100.000 sentences by choosing 1/3 of
+sentences from each source.
+
+* Choose a random word in a sentence, but not the very first word. Use the part
+of the sentence before the selected word as a prefix, and attempt to predict
+the selected word.
+
+* Run the prediction algorithm for all samples, predicting top 5 candidates.
+
+* For each batch of 1000 sentences, calculate percentage of cases when the
+word actually present in the sentence was in top 1, top 3 or top 5 of predicted
+candidates.
+
+```{r eval=FALSE}
+source("include/predict.test.R")
+
+for (source in c("blogs", "news", "twitter", "all")) {
+    set.seed(12345)
+    predict.test.sb.cache(source, "testing", n.samples = 100000,
+                          threshold = 1, removeStopwords = TRUE)
+    
+    set.seed(12345)
+    predict.test.sb.cache(source, "testing", n.samples = 100000,
+                          threshold = 1, removeStopwords = FALSE)
+}
+```
+
+The meaning of the parameter "threshold" will be explained later, when we will
+[optimize meta-parameters](#optimizing_meta_parameters) of the prediction
+algorithm. Now it is enough to say that "threshold = 1" uses complete tables
+with n-grams we have built before.
+
+The chart below shows the the precision of our prediction algorithm for the
+aggregated data sources, as well as separately for blogs, news and Twitter,
+with and without stop words. The first chart column shows percentage of correct
+predictions (our top candidate is exactly the word present in the original
+text). The second and third chart columns show percentage of cases when the
+right word was amongst our Top-3 or Top-5 predicted candidates.
+
+```{r threshold.1.chart, echo=FALSE, message=FALSE, fig.width=10}
+stat.predict.threshold.1.chart <- function(type = "boxplot") {
+    # Collect statistics with and without stop words.
+    stat.sw <- stat.predict.sources.n.cache(1, "testing", removeStopwords = FALSE)
+    stat.sw$Group <- factor(paste0(stat.sw$Source, stat.sw$RemoveStopwords))
+    
+    stat.nosw <- stat.predict.sources.n.cache(1, "testing", removeStopwords = TRUE)
+    stat.nosw$Group <- factor(paste0(stat.nosw$Source, stat.nosw$RemoveStopwords))
+    
+    palette.fill = c("#F9A602",
+                     "#F9A60240",
+                     "#B80F0A",
+                     "#B80F0A40",
+                     "#4CBB17",
+                     "#4CBB1740",
+                     "#0F52BA",
+                     "#0F52BA40")
+    
+    if (type == "boxplot") {
+        geom_func <- function(...) geom_boxplot(...)
+    } else if (type == "violin") {
+        geom_func <- function(...) geom_violin(..., adjust = 0.5,
+                                               draw_quantiles = c(0.25, 0.5, 0.75))
+    }
+    
+    ggplot(data = stat.sw, aes(x = as.factor(Rank), y = Match * 100, fill = Group)) +
+        geom_func() +
+        geom_func(data = stat.nosw, aes(x = as.factor(Rank), y = Match * 100, fill = Group)) +
+        scale_fill_manual(name = "Source",
+                            labels = c("Aggregated (with stop words)",
+                                       "Aggregated (without stop words)",
+                                       "Blogs (with stop words)",
+                                       "Blogs (without stop words)",
+                                       "News (with stop words)",
+                                       "News (without stop words)",
+                                       "Twitter (with stop words)",
+                                       "Twitter (without stop words)"),
+                          values = palette.fill) +
+        labs(title = "Prediction precision") +
+        labs(x = "Top N predictions") +
+        labs(y = "Correct prediction in top N, %") + 
+        theme_bw(base_size = 14)
+}
+stat.predict.threshold.1.chart("boxplot")
+```
+
+```{r threshold.1.tbl.sw, echo=FALSE, message=FALSE}
+stat.predict.threshold.1.tbl.sw <- function() {
+  stat.sw <- stat.predict.sources.agg.n.build(1, "testing", removeStopwords = FALSE) %>%
+    arrange(Source) %>%
+    mutate(Mean = Mean * 100,
+           ConfIntLow = ConfIntLow * 100,
+           ConfIntHigh = ConfIntHigh * 100)
+  
+  stat.sw.1 <- stat.sw %>% filter(Rank == 1)
+  stat.sw.3 <- stat.sw %>% filter(Rank == 3)
+  stat.sw.5 <- stat.sw %>% filter(Rank == 5)
+
+  stat.sw.1.tbl <- data.frame(
+    Source = c("Aggregated", "Blogs", "News", "Twitter"),
+    Mean.1 = sprintf("%.2f", stat.sw.1$Mean),
+    ConfInt.1 = sprintf("(%.2f, %.2f)", stat.sw.1$ConfIntLow, stat.sw.1$ConfIntHigh),
+    Mean.3 = sprintf("%.2f", stat.sw.3$Mean),
+    ConfInt.3 = sprintf("(%.2f, %.2f)", stat.sw.3$ConfIntLow, stat.sw.3$ConfIntHigh),
+    Mean.5 = sprintf("%.2f", stat.sw.5$Mean),
+    ConfInt.5 = sprintf("(%.2f, %.2f)", stat.sw.5$ConfIntLow, stat.sw.5$ConfIntHigh),
+    stringsAsFactors = FALSE
+  )
+  
+  kable(stat.sw.1.tbl,
+        caption = "Prediction precision, with stop words",
+        booktabs = TRUE,
+        col.names = c("Source", rep(c("Mean, %", "Conf. Int. 95%"), 3))) %>%
+    add_header_above(header = c("",
+                                "Word correctly predicted" = 2,
+                                "Word in Top 3" = 2,
+                                "Word in Top 5" = 2)) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+}
+
+stat.predict.threshold.1.tbl.nosw <- function() {
+  stat.sw <- stat.predict.sources.agg.n.build(1, "testing", removeStopwords = TRUE) %>%
+    arrange(Source) %>%
+    mutate(Mean = Mean * 100,
+           ConfIntLow = ConfIntLow * 100,
+           ConfIntHigh = ConfIntHigh * 100)
+  
+  stat.sw.1 <- stat.sw %>% filter(Rank == 1)
+  stat.sw.3 <- stat.sw %>% filter(Rank == 3)
+  stat.sw.5 <- stat.sw %>% filter(Rank == 5)
+
+  stat.sw.1.tbl <- data.frame(
+    Source = c("Aggregated", "Blogs", "News", "Twitter"),
+    Mean.1 = sprintf("%.2f", stat.sw.1$Mean),
+    ConfInt.1 = sprintf("(%.2f, %.2f)", stat.sw.1$ConfIntLow, stat.sw.1$ConfIntHigh),
+    Mean.3 = sprintf("%.2f", stat.sw.3$Mean),
+    ConfInt.3 = sprintf("(%.2f, %.2f)", stat.sw.3$ConfIntLow, stat.sw.3$ConfIntHigh),
+    Mean.5 = sprintf("%.2f", stat.sw.5$Mean),
+    ConfInt.5 = sprintf("(%.2f, %.2f)", stat.sw.5$ConfIntLow, stat.sw.5$ConfIntHigh),
+    stringsAsFactors = FALSE
+  )
+  
+  kable(stat.sw.1.tbl,
+        caption = "Prediction precision, without stop words",
+        booktabs = TRUE,
+        col.names = c("Source", rep(c("Mean, %", "Conf. Int. 95%"), 3))) %>%
+    add_header_above(header = c("",
+                                "Word correctly predicted" = 2,
+                                "Word in Top 3" = 2,
+                                "Word in Top 5" = 2)) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+}
+
+stat.predict.threshold.1.tbl.sw()
+stat.predict.threshold.1.tbl.nosw()
+```
+
+The first important insight from the chart and tables above is that the
+prediction based on n-grams with stop words outperforms the same algorithm
+based on n-grams without stop words by more than 10%. From now on we continue
+development and tuning only using n-grams with stop words.
+
+It is interesting to note that our algorithm predicts the next word for
+sentences from the news source best. Blogs and Twitter are very close, with
+Twitter slightly better for exact match and slightly worse for Top-3 and Top-5
+prediction rating. The likely explanation is that news tend to use the same
+expressions more often than less formal blogs and Twitter.
+
+Now, when we know that our algorithm generally works, it's a time to optimize
+it.
+
+# <a name="optimizing_meta_parameters"></a>Optimizing meta-parameters
+
+Until now we have used all collected n-grams to predict the next word using
+the Stupid Backoff algorithm. As we have calculated, even after 
+[all previous optimizations](#optimizing_tables) our n-gram tables are too
+large to be used in a Shiny application. Could we remove some n-grams without
+losing much prediction power? We are going to answer the question in this
+section.
+
+Our n-gram tables contain all collected n-grams, but are all of them equally
+useful for our prediction algorithm? For example, the 5-gram "at the end of the"
+appears in our corpora 2181 times, whereas the 5-gram
+"can't go anywehre with them" appear only once. Intuitively the first n-gram
+is much more useful, because the probability to encounter it again in other
+texts is much higher than the probability to find a seldom n-gram in another
+text.
+
+```{r ngram.coverage.percentage.cache, echo=FALSE, message=FALSE}
+ngram.total.size <- function(n) {
+  ngram.freq <- ngram.freq.cache(n)
+  nrow(ngram.freq)
+}
+
+ngram.threshold.size <- function(n, threshold) {
+  ngram.freq <- ngram.freq.cache(n)
+  ngram.freq %>% filter(Freq <= threshold) %>% nrow()
+}
+
+ngram.1.size <- get.var.cache("ngram.1.size", function() ngram.total.size(1),
+                              FALSE)
+ngram.5.size <- get.var.cache("ngram.5.size", function() ngram.total.size(5),
+                              FALSE)
+
+ngram.1.1.size <- get.var.cache("ngram.1.1.size",
+                                function() ngram.threshold.size(1, 1),
+                                FALSE)
+ngram.5.1.size <- get.var.cache("ngram.5.1.size", 
+                                function() ngram.threshold.size(5, 1),
+                                FALSE)
+
+ngram.1.pct <- ngram.1.1.size / ngram.1.size
+ngram.5.pct <- ngram.5.1.size / ngram.5.size
+```
+
+In the [Mileston Report](MilestoneReportWeek2.html#3_to_6_grams) we have also
+found out that seldom n-grams comprise a very large part of tables for large n.
+For example, there are `r formatC(ngram.1.size, big.mark = ",", format = "d")`
+distinct 1-grams, and `r formatC(ngram.1.1.size, big.mark = ",", format = "d")`
+(`r sprintf("%.2f%%", ngram.1.pct * 100)`) appears just once.
+For 5-grams it looks even more dramatic: our corpora contains
+`r formatC(ngram.5.size, big.mark = ",", format = "d")` distinct 5-grams,
+and `r formatC(ngram.5.1.size, big.mark = ",", format = "d")`
+(`r sprintf("%.2f%%", ngram.5.pct * 100)`) appear just once.
+Removing from our tables entries which appear just once could significantly
+reduce the memory usage.
+
+If we keep in an n-gram table only entries which appear in the corpus at least
+$m$ times and remove the rest, we will say that the table has a *threshold* $m$.
+For example, a n-gram table with the threshold 3 contains only n-grams which
+appear at least 3 times. Obviously, the complete table with all available
+n-grams is a table with the threshold 1.
+
+To analyze how removing low-frequency n-grams affects precision of our
+prediction algorithm, we build n-gram tables with thresholds 2 to 6, and run
+our prediction algorithm with these tables. Our approach is the same as in the
+previous section: for each source and threshold we process 100 batches of 1.000
+samples each. The chart and table below shows how our prediction quality
+changes as we increase the threshold.
+
+```{r threshold.all.chart, echo=FALSE, message=FALSE, fig.width=10}
+stat.predict.threshold.all.chart <- function() {
+    stat.testing.all <- stat.predict.sources.agg.all.build("testing")
+    
+    stat.testing.1 <- stat.testing.all %>% filter(Rank == 1)
+    stat.testing.3 <- stat.testing.all %>% filter(Rank == 3)
+    stat.testing.5 <- stat.testing.all %>% filter(Rank == 5)
+
+    palette.color = c("#F9A602",
+                      "#B80F0A",
+                      "#4CBB17",
+                      "#0F52BA")
+    
+    ggplot(data = stat.testing.1, aes(x = Threshold, y = Mean * 100, color = Source)) +
+        geom_line(size = 1) +
+        geom_line(data = stat.testing.3, aes(x = Threshold, y = Mean * 100, color = Source), size = 1) +
+        geom_line(data = stat.testing.5, aes(x = Threshold, y = Mean * 100, color = Source), size = 1) +
+        scale_x_continuous(breaks=c(1:6)) +
+        scale_color_manual(name = "Source",
+                           labels = c("Aggregated",
+                                      "Blogs",
+                                      "News",
+                                      "Twitter"),
+                           values = palette.color) +
+        annotate(geom = "text", x = 4.5, y = 17.3, label = "Correct prediction") +
+        annotate(geom = "text", x = 4.5, y = 26.9, label = "Top 3") +
+        annotate(geom = "text", x = 4.5, y = 31.6, label = "Top 5") +
+        labs(title = "Prediction precision") +
+        labs(x = "Minimum frequency threshold of n-grams table") +
+        labs(y = "Correct prediction in top N, %") + 
+        theme_bw(base_size = 14)
+}
+stat.predict.threshold.all.chart()
+```
+
+```{r threshold.all.tbl, echo=FALSE, message=FALSE}
+stat.predict.threshold.all.tbl <- function() {
+  stat.testing <- stat.predict.sources.agg.all.build("testing")
+  
+  stat.testing.all <- stat.testing %>% filter(Source == "all")
+  stat.testing.blogs <- stat.testing %>% filter(Source == "blogs")
+  stat.testing.news <- stat.testing %>% filter(Source == "news")
+  stat.testing.twitter <- stat.testing %>% filter(Source == "twitter")
+  
+  # Collect prediction precision for each combination of source and threshold.
+  stat.testing.tbl <- data.frame(
+    Threshold = 1:6,
+    All.1 = stat.testing.all %>% filter(Rank == 1) %>% pull(Mean),
+    Blogs.1 = stat.testing.blogs %>% filter(Rank == 1) %>% pull(Mean),
+    News.1 = stat.testing.news %>% filter(Rank == 1) %>% pull(Mean),
+    Twitter.1 = stat.testing.twitter %>% filter(Rank == 1) %>% pull(Mean),
+    All.3 = stat.testing.all %>% filter(Rank == 3) %>% pull(Mean),
+    Blogs.3 = stat.testing.blogs %>% filter(Rank == 3) %>% pull(Mean),
+    News.3 = stat.testing.news %>% filter(Rank == 3) %>% pull(Mean),
+    Twitter.3 = stat.testing.twitter %>% filter(Rank == 5) %>% pull(Mean),
+    All.5 = stat.testing.all %>% filter(Rank == 5) %>% pull(Mean),
+    Blogs.5 = stat.testing.blogs %>% filter(Rank == 5) %>% pull(Mean),
+    News.5 = stat.testing.news %>% filter(Rank == 5) %>% pull(Mean),
+    Twitter.5 = stat.testing.twitter %>% filter(Rank == 5) %>% pull(Mean),
+    stringsAsFactors = FALSE
+  )
+  
+  # Calculate the maximum value in each column and the corresponding index.
+  stat.testing.max <- apply(stat.testing.tbl[,2:13], 2, max)
+  All.1.max.idx <- match(stat.testing.max[1], stat.testing.tbl$All.1)
+  Blogs.1.max.idx <- match(stat.testing.max[2], stat.testing.tbl$Blogs.1)
+  News.1.max.idx <- match(stat.testing.max[3], stat.testing.tbl$News.1)
+  Twitter.1.max.idx <- match(stat.testing.max[4], stat.testing.tbl$Twitter.1)
+  All.3.max.idx <- match(stat.testing.max[5], stat.testing.tbl$All.3)
+  Blogs.3.max.idx <- match(stat.testing.max[6], stat.testing.tbl$Blogs.3)
+  News.3.max.idx <- match(stat.testing.max[7], stat.testing.tbl$News.3)
+  Twitter.3.max.idx <- match(stat.testing.max[8], stat.testing.tbl$Twitter.3)
+  All.5.max.idx <- match(stat.testing.max[9], stat.testing.tbl$All.5)
+  Blogs.5.max.idx <- match(stat.testing.max[10], stat.testing.tbl$Blogs.5)
+  News.5.max.idx <- match(stat.testing.max[11], stat.testing.tbl$News.5)
+  Twitter.5.max.idx <- match(stat.testing.max[12], stat.testing.tbl$Twitter.5)
+
+  # Calculate prediction precision with threshold 6 vs. best.
+  stat.testing.6vsBest.tbl <- data.frame(
+    Threshold = "Thres. 6 vs. best",
+    All.1 = stat.testing.tbl$All.1[6] - max(stat.testing.tbl$All.1),
+    Blogs.1 = stat.testing.tbl$Blogs.1[6] - max(stat.testing.tbl$Blogs.1),
+    News.1 = stat.testing.tbl$News.1[6] - max(stat.testing.tbl$News.1),
+    Twitter.1 = stat.testing.tbl$Twitter.1[6] - max(stat.testing.tbl$Twitter.1),
+    All.3 = stat.testing.tbl$All.3[6] - max(stat.testing.tbl$All.3),
+    Blogs.3 = stat.testing.tbl$Blogs.3[6] - max(stat.testing.tbl$Blogs.3),
+    News.3 = stat.testing.tbl$News.3[6] - max(stat.testing.tbl$News.3),
+    Twitter.3 = stat.testing.tbl$Twitter.3[6] - max(stat.testing.tbl$Twitter.3),
+    All.5 = stat.testing.tbl$All.5[6] - max(stat.testing.tbl$All.5),
+    Blogs.5 = stat.testing.tbl$Blogs.5[6] - max(stat.testing.tbl$Blogs.5),
+    News.5 = stat.testing.tbl$News.5[6] - max(stat.testing.tbl$News.5),
+    Twitter.5 = stat.testing.tbl$Twitter.5[6] - max(stat.testing.tbl$Twitter.5),
+    stringsAsFactors = FALSE
+  )
+
+  # Merge the last 2 tables.
+  stat.testing.tbl <- rbind(stat.testing.tbl, stat.testing.6vsBest.tbl)  
+  
+  # Format as percentage.
+  stat.testing.tbl.fmt <- data.frame(cbind(
+    stat.testing.tbl[,1],
+    apply(stat.testing.tbl[,2:13], 2, function(x) sprintf("%.2f", x * 100))),
+    stringsAsFactors = FALSE)
+  
+  max.background <- "#4CBB1740"
+  
+  # Highlight max. value in each column.
+  stat.testing.tbl.fmt$All.1[All.1.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$All.1[All.1.max.idx], background = max.background)
+  stat.testing.tbl.fmt$Blogs.1[Blogs.1.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$Blogs.1[Blogs.1.max.idx], background = max.background)
+  stat.testing.tbl.fmt$News.1[News.1.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$News.1[News.1.max.idx], background = max.background)
+  stat.testing.tbl.fmt$Twitter.1[Twitter.1.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$Twitter.1[Twitter.1.max.idx], background = max.background)
+
+  stat.testing.tbl.fmt$All.3[All.3.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$All.3[All.3.max.idx], background = max.background)
+  stat.testing.tbl.fmt$Blogs.3[Blogs.3.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$Blogs.3[Blogs.3.max.idx], background = max.background)
+  stat.testing.tbl.fmt$News.3[News.3.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$News.3[News.3.max.idx], background = max.background)
+  stat.testing.tbl.fmt$Twitter.3[Twitter.3.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$Twitter.3[Twitter.3.max.idx], background = max.background)
+
+  stat.testing.tbl.fmt$All.5[All.5.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$All.5[All.5.max.idx], background = max.background)
+  stat.testing.tbl.fmt$Blogs.5[Blogs.5.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$Blogs.5[Blogs.5.max.idx], background = max.background)
+  stat.testing.tbl.fmt$News.5[News.5.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$News.5[News.5.max.idx], background = max.background)
+  stat.testing.tbl.fmt$Twitter.5[Twitter.5.max.idx] <-
+    cell_spec(stat.testing.tbl.fmt$Twitter.5[Twitter.5.max.idx], background = max.background)
+  
+  kable(stat.testing.tbl.fmt,
+        caption = "Prediction precision (%) vs. threshold",
+        booktabs = TRUE,
+        format = "html", escape = FALSE,
+        col.names = c("Threshold", rep(c("Aggr.", "Blogs", "News", "Twitter"), 3)),
+        align = c("l", rep("r", 12))) %>%
+    add_header_above(header = c("",
+                                "Word correctly predicted" = 4,
+                                "Word in Top 3" = 4,
+                                "Word in Top 5" = 4)) %>%
+    row_spec(7, bold = T, background = "#C0C0C0") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+}
+stat.predict.threshold.all.tbl()
+```
+
+The table above shows how precision of our prediction algorithm changes
+dependent on the threshold. In each column, the cell highlighted by a light
+green contains the highest value, that is the best precision. The last line
+compares precision with threshold 6 vs. the best precision in the same column.
+
+From the chart and the table we may conclude the following:
+
+* In most cases, we achieve the highest precision using threshold 2, that is
+keeping only n-grams which appears in the corpora at least 2 times. The
+intuitive explanation of this fact is that the Stupid Backoff algorithm scores
+longer n-grams significantly higher than shorter n-grams, without taking into
+account the absolute frequency. A 5-gram which appears just once could be 
+a typo or an extremely seldom expression, but the Stupid Backoff algorithm very
+often will assign to it a high score.
+
+* As we increase the threshold, the precision of our prediction is reduced, but
+not very dramatically. The average precision loss in our table is 1.5%.
+
 # <a name="references"></a>References
 
-* <a name="hc_corpora"></a>(1) HC Corpora provided by [corpora.epizy.com](http://corpora.epizy.com).
+<a name="hc_corpora"></a>(1) HC Corpora provided by [corpora.epizy.com](http://corpora.epizy.com).
 [About the corpora](http://corpora.epizy.com/about.html). [Download the corpora](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
 
+<a name="stupid_backoff"></a>(2) Thorsten Brants, Ashok C. Popat, Peng Xu,
+Franz J. Och, Jeffrey Dean. 2007. Large Language Models in Machine
+Translation. [https://www.aclweb.org/anthology/D07-1090](https://www.aclweb.org/anthology/D07-1090).
