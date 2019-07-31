@@ -19,19 +19,33 @@ shinyUI(
             "Prediction",
             fluidPage(
                 fluidRow(column(12,
-                    p("Start typing text in the input area below. The prediction of the next word will appear and update as you type.")
+                                p("Text area: enter the text here, and predicted
+    words will appear on the chart below. The chart shows multiple candidates
+    ordered by score, providing a visual clue on how probable each candidate is.
+    When “Predict partially entered words” is activated, ",
+    tags$strong("you have to type the space character to predict the next word"),
+    "otherwise an ending of the current word is predicted.")
                 )),
                 fluidRow(column(12,
-                    p("If the checkbox 'Predict partially entered words' is selected, the application will attempt to predict continuation of a word you are currently typing. In this mode, ", tags$strong("the next word is predicted only after you type the space character"), " to indicate that you have finished entering the previous word.")
+                    p("Number of predictions: choose from 1 to 10 candidates to predict.")
                 )),
                 fluidRow(column(12,
-                    p("When predicting partially entered words, if you start entering a word unknown to the application, it assumes the word to be misspelled and suggests a correction. Try to enter 'mashine' instead of 'machine'.")
+                    p("Predict partially entered words: select the checkbox to
+    activate the extension which predicts partially entered words.")            
                 )),
                 fluidRow(column(12,
-                    p("Use the slider below the input area to choose the number of predicted words. Click the button 'Random Sample' to fill the input area with one of over 1000 prepared sample texts.")
+                    p("When predicting partially entered words, if you start
+    entering a word unknown to the application, it assumes the word to be
+    misspelled and suggests a correction. Try to enter 'mashine' instead of
+    'machine'.")
                 )),
                 fluidRow(column(12,
-                    p("Choose the tab 'About' in the headline to learn more about this application.")
+                    p("Random sample: populate the text area with a random
+    sample from a selection of over 1000 prepared sample texts.")
+                )),
+                fluidRow(column(12,
+                    p("Choose the tab 'About' in the headline to learn more
+    about this application.")
                 )),
                 fluidRow(column(12,
                     textAreaInput("textPrefix", label = NULL, width = "800px")
