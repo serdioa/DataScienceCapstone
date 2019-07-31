@@ -374,7 +374,7 @@ summary {
 
 <h1 class="title toc-ignore">Next Word Prediction: Stupid Backoff</h1>
 <h4 class="author">Alexey Serdyuk</h4>
-<h4 class="date">31 Juli 2019</h4>
+<h4 class="date">31.07.2019</h4>
 
 </div>
 
@@ -383,6 +383,7 @@ summary {
 <h1>Content</h1>
 <ul>
 <li><a href="#synopsis">Synopsis</a></li>
+<li><a href="#model">Model</a></li>
 <li><a href="#download_and_split">Downloading and splitting the corpus</a></li>
 <li><a href="#cleaning_preprocessing">Cleaning and preprocessing the corpus</a></li>
 <li><a href="#building_n_grams">Building n-grams</a></li>
@@ -402,12 +403,22 @@ summary {
 <h1><a name="synopsis"></a>Synopsis</h1>
 <p>This document provides the background and describes the approach used to implement the application “Next Word Prediction: Stupid Backoff”.</p>
 <p>The application was developed as a capstone project for the for the cycle of courses <a href="https://www.coursera.org/specializations/jhu-data-science">Data Science Specialization</a> offered on <a href="https://www.coursera.org">Coursera</a> by <a href="https://www.jhu.edu">Johns Hopkins University</a>. The purpose of the capstone project is to build a Natural Language Processing (NLP) application that, given a chunk of text, predicts the next most probable word. The application may be used, for example, in mobile devices to provide suggestions as the user enters text, or as a part of a spelling correction module in a text editor.</p>
-<p>The application is available online: <a href="https://serdioa.shinyapps.io/sb-predict" class="uri">https://serdioa.shinyapps.io/sb-predict</a>.</p>
-<p>The source code is available on GitHub: <a href="https://github.com/serdioa/DataScienceCapstone" class="uri">https://github.com/serdioa/DataScienceCapstone</a></p>
+<p>You may find the following links useful:</p>
+<ul>
+<li><p>Short version of this document: <a href="https://serdioa.github.io/DataScienceCapstone/ImplementationReportShort.html" class="uri">https://serdioa.github.io/DataScienceCapstone/ImplementationReportShort.html</a></p></li>
+<li><p>Presentation: <a href="https://serdioa.github.io/DataScienceCapstone/presentation/index.html" class="uri">https://serdioa.github.io/DataScienceCapstone/presentation/index.html</a></p></li>
+<li><p>Online application: <a href="https://serdioa.shinyapps.io/sb-predict" class="uri">https://serdioa.shinyapps.io/sb-predict</a></p></li>
+<li><p>Source code: <a href="https://github.com/serdioa/DataScienceCapstone" class="uri">https://github.com/serdioa/DataScienceCapstone</a></p></li>
+</ul>
+</div>
+<div id="model" class="section level1">
+<h1><a name="model"></a>Model</h1>
+<p>We are going to predicts the next word in a text given a prefix by using a Markov Chain model simplified to n-grams.</p>
+<p>The Markov Chain model assumes that in a natural language sentence a probability of each word depends only on previous words. The n-gram model simplifies the Markov Chain model by considering each word to depend only on the previous N words, thus ignoring long-range dependency. The n-gram model combines simplicity with an acceptable prediction quality, making it a model of choice for many Natural Language Processing (NLP) applications.</p>
 </div>
 <div id="downloading-and-splitting-the-corpus" class="section level1">
 <h1><a name="download_and_split"></a>Downloading and splitting the corpus</h1>
-<p>Before we start discussing the application, there is a short general consideration. We decided to not include R script sources as the part of this document, but to keep them in separate script files which we reference. Moreover, many steps done when preparing the data and tuning meta-parameters require many hours to run. It would be impossible to re-run all steps each time when we re-render this document. R Markdown provides some possibilities to cache intermediate results, but they are not adequate to our task, since we were not able to keep in memory all intermediate results at once. Hence our approach was to process the data piecewise, explicitly caching intermediate results.</p>
+<p>Before we start discussing the application in detail, there is a short general consideration. We decided to not include R script sources as the part of this document, but to keep them in separate script files which we reference. Moreover, many steps done when preparing the data and tuning meta-parameters require many hours to run. It would be impossible to re-run all steps each time when we re-render this document. R Markdown provides some possibilities to cache intermediate results, but they are not adequate to our task, since we were not able to keep in memory all intermediate results at once. Hence our approach was to process the data piecewise, explicitly caching intermediate results.</p>
 <p>Coursera provides a training text corpora HC Corpora <a href="#hc_corpora">(1)</a>. The corpora contains texts in several languages collected from various sources in Web, including blogs, news web sites and Twitter. The English corpora consists of approximately 4.2 millions lines of text.</p>
 <p>We start by downloading and unzipping the text corpora. The downloaded data is stored in the directory “cache”.</p>
 <pre class="r"><code>source(&quot;include/download.R&quot;)

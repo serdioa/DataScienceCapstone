@@ -1,7 +1,7 @@
 ---
 title: "Next Word Prediction: Stupid Backoff"
 author: "Alexey Serdyuk"
-date: "`r format(Sys.time(), '%d %B %Y')`"
+date: "`r format(Sys.time(), '%d.%m.%Y')`"
 output: html_document
 #output:
 #  md_document:
@@ -16,6 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Content
 
 * [Synopsis](#synopsis)
+* [Model](#model)
 * [Downloading and splitting the corpus](#download_and_split)
 * [Cleaning and preprocessing the corpus](#cleaning_preprocessing)
 * [Building n-grams](#building_n_grams)
@@ -45,9 +46,27 @@ word. The application may be used, for example, in mobile devices to provide
 suggestions as the user enters text, or as a part of a spelling correction
 module in a text editor.
 
-The application is available online: https://serdioa.shinyapps.io/sb-predict.
+You may find the following links useful:
 
-The source code is available on GitHub: https://github.com/serdioa/DataScienceCapstone
+* Short version of this document: https://serdioa.github.io/DataScienceCapstone/ImplementationReportShort.html
+
+* Presentation: https://serdioa.github.io/DataScienceCapstone/presentation/index.html
+
+* Online application: https://serdioa.shinyapps.io/sb-predict
+
+* Source code: https://github.com/serdioa/DataScienceCapstone
+
+# <a name="model"></a>Model
+
+We are going to predicts the next word in a text given a prefix by using a
+Markov Chain model simplified to n-grams.
+
+The Markov Chain model assumes that in a natural language sentence
+a probability of each word depends only on previous words. The n-gram model
+simplifies the Markov Chain model by considering each word to depend only on
+the previous N words, thus ignoring long-range dependency. The n-gram model
+combines simplicity with an acceptable prediction quality, making it a model
+of choice for many Natural Language Processing (NLP) applications.
 
 # <a name="download_and_split"></a>Downloading and splitting the corpus
 
@@ -57,7 +76,7 @@ library(hms)
 library(kableExtra)
 ```
 
-Before we start discussing the application, there is a short general
+Before we start discussing the application in detail, there is a short general
 consideration. We decided to not include R script sources as the part of this
 document, but to keep them in separate script files which we reference.
 Moreover, many steps done when preparing the data and tuning meta-parameters
