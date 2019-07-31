@@ -281,7 +281,7 @@ shinyServer(function(input, output, session) {
     # Keep the word, if it is included in the table with top stems.
     # Otherwise, replaces the word with the specified token.
     preprocess.top.stem.keep <- function(stem) {
-        ifelse(is.na(fmatch(stem, stems.freq.top)), "UNK", stem)
+        ifelse(is.na(fmatch(stem, stems.top)), "UNK", stem)
     }
     
     # Stem the specified token, transform it to the lower case, and

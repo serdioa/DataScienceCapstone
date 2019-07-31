@@ -16,8 +16,8 @@ replacements.tokens.token <- replacements.tokens$token
 #
 # Load stems used in n-grams.
 #
-stems.freq.top <- readRDS(file.path("data", "stems.freq.top.RDS"))
-dict.stems <- c("UNK", stems.freq.top)
+stems.top <- readRDS(file.path("data", "stems.top.RDS"))
+dict.stems <- c("UNK", stems.top)
 dict.hash <- hashmap(keys = dict.stems, values = 0 : (256*256-1))
 
 
