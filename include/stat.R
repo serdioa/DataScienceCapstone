@@ -4,6 +4,7 @@
 
 library(dplyr)
 library(ggplot2)
+library(hms)
 library(tools)
 
 source("include/cache.R")
@@ -464,7 +465,6 @@ stat.predict.agg.n.build <- function(threshold, source, type,
                stringsAsFactors = FALSE)
 }
 
-
 #
 # Collects the aggregated statistics (mean, 95% confidence interval) on
 # predictions for the specified threshold and all sources.
@@ -506,6 +506,38 @@ stat.predict.sources.agg.all.build <- function(type, removeStopwords = FALSE) {
           stat.predict.sources.agg.n.build(4, type, removeStopwords),
           stat.predict.sources.agg.n.build(5, type, removeStopwords),
           stat.predict.sources.agg.n.build(6, type, removeStopwords))
+}
+
+#
+# Returns the data frame with statistics on duration of tbe testing.
+#
+stat.predict.time <- function() {
+    # Raw data.
+    stat <- data.frame(
+        Threshold = 1:6,
+        Start = c("12:48:05", "16:37:58", "19:20:17", "21:55:34", "00:17:38","02:31:06"),
+        End = c("16:37:57", "19:20:15", "21:55:33", "00:17:36", "02:31:05", "04:35:41")
+    )
+    
+    # Transform to timestamps.
+    stat$Start.Ts <- strptime(stat$Start, format = "%H:%M:%S")
+    stat$End.Ts <- strptime(stat$End, format = "%H:%M:%S")
+    
+    # Calculate the duration.
+    stat$Duration <- difftime(stat$End.Ts, stat$Start.Ts, unit = "secs")
+    
+    # Adjust for the over-the-midnight.
+    stat$Duration <- stat$Duration + ifelse(stat$Duration > 0, 0, 24 * 60 * 60)
+
+    # Format the duration.
+    stat$Duration.Fmt <- sprintf("%s", as_hms(stat$Duration))
+    
+    # We have processed 400.000 rows (100.000 rows for each of bogs, news and
+    # Twitter, as well as 100.000 for the aggregated data source).
+    # Calculate the average processing time.
+    stat$Processing.Avg.Ms <- as.numeric(stat$Duration / 400000 * 1000)
+    
+    stat
 }
 
 ################################################################################
@@ -569,7 +601,7 @@ stat.predict.threshold.all.chart <- function() {
     stat.testing.1 <- stat.testing.all %>% filter(Rank == 1)
     stat.testing.3 <- stat.testing.all %>% filter(Rank == 3)
     stat.testing.5 <- stat.testing.all %>% filter(Rank == 5)
-
+    
     palette.color = c("#F9A602",
                       "#B80F0A",
                       "#4CBB17",
@@ -579,6 +611,7 @@ stat.predict.threshold.all.chart <- function() {
         geom_line(size = 1) +
         geom_line(data = stat.testing.3, aes(x = Threshold, y = Mean * 100, color = Source), size = 1) +
         geom_line(data = stat.testing.5, aes(x = Threshold, y = Mean * 100, color = Source), size = 1) +
+        scale_x_continuous(breaks=c(1:6)) +
         scale_color_manual(name = "Source",
                            labels = c("Aggregated",
                                       "Blogs",
@@ -594,128 +627,72 @@ stat.predict.threshold.all.chart <- function() {
         theme_bw(base_size = 14)
 }
 
-
-
+#
+# Chart: impact of threshold on the size of n-grams in memory.
+#
+stat.ngram.optimize.all.chart <- function() {
+    stat.size <- stat.ngram.optimize.all.cache()
+    
+    # Change the order of N.
+    stat.size$N <- factor(stat.size$N, ordered = TRUE)
+    
+    ggplot(data = stat.size, aes(x = Threshold, y = Size, fill = N)) +
+        geom_bar(stat="identity") +
+        scale_x_continuous(breaks=c(1:6)) +
+        scale_fill_brewer(palette = "Greens") +
+        labs(title = "Size of n-gram tables in memory") +
+        labs(x = "Threshold") +
+        labs(y = "Size, MiB") +
+        theme_bw(base_size = 14)
+}
 
 #
-# Collect statistics of validation.
+# Chart: impact of theshold on the duration of prediction.
 #
-stat.predict.sb.validation.all <- function() {
-    validation.blogs <- stat.predict.sb.mono.collect.n("blogs", "validation")
-    validation.news <- stat.predict.sb.mono.collect.n("news", "validation")
-    validation.twitter <- stat.predict.sb.mono.collect.n("twitter", "validation")
-    validation.all <- stat.predict.sb.mono.collect.n("all", "validation")
-
-    rbind(validation.blogs, validation.news, validation.twitter, validation.all)
-}
-
-stat.predict.sb.validation.all.chart <- function() {
-    if (!exists("stat.validation")) {
-        stat.validation <- stat.predict.sb.validation.all()
-    }
+stat.predict.time.chart <- function() {
+    stat <- stat.predict.time()
     
-    ggplot(data = stat.validation, aes(x = as.factor(Rank), y = Match * 100, fill = Source)) +
-        geom_boxplot() +
-        scale_fill_discrete(name = "Source",
-                            labels = c("Blogs", "News", "Twitter", "Aggregated")) +
-        labs(title = "Prediction precision") +
-        labs(x = "Top N predictions") +
-        labs(y = "Correct prediction in top N, %") + 
-        theme_bw(base_size = 14)
-}
-
-stat.predict.sb.validation.all.violin.chart <- function() {
-    if (!exists("stat.validation")) {
-        stat.validation <- stat.predict.sb.validation.all()
-    }
-    
-    ggplot(data = stat.validation, aes(x = as.factor(Rank), y = Match * 100, fill = Source)) +
-        geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
-        scale_fill_discrete(name = "Source",
-                            labels = c("Blogs", "News", "Twitter", "Aggregated")) +
-        labs(title = "Prediction precision") +
-        labs(x = "Top N predictions") +
-        labs(y = "Correct prediction in top N, %") + 
-        theme_bw(base_size = 14)
-}
-
-stat.predict.sb.testing.all.chart <- function() {
-    if (!exists("stat.testing")) {
-        stat.testing <- stat.predict.sb.mono.collect.all()
-    }
-    stat.testing <- stat.testing %>%
-        filter(RemoveStopwords == FALSE) %>%
-        mutate(Group = paste0(toTitleCase(Source), " (rank ", Rank, ")"))
-
-    ggplot(data = stat.testing, aes(x = as.factor(Threshold), y = Match * 100, fill = Group)) +
-        geom_boxplot() +
-#        scale_fill_discrete(name = "Source",
-#                            labels = c("Blogs", "News", "Twitter", "Aggregated")) +
-        labs(title = "Prediction precision") +
-        labs(x = "Top N predictions") +
-        labs(y = "Correct prediction in top N, %") + 
-        theme_bw(base_size = 14)
-}
-
-stat.predict.sb.testing.all.box.chart <- function() {
-    if (!exists("stat.testing")) {
-        stat.testing <- stat.predict.sb.mono.collect.all()
-    }
-
-    stat.testing.1 <- stat.testing %>%
-        filter(RemoveStopwords == FALSE) %>%
-        filter(Rank == 1)
-    stat.testing.3 <- stat.testing %>%
-        filter(RemoveStopwords == FALSE) %>%
-        filter(Rank == 3)
-    stat.testing.5 <- stat.testing %>%
-        filter(RemoveStopwords == FALSE) %>%
-        filter(Rank == 5)
-    
-    ggplot(data = stat.testing.1, aes(x = as.factor(Threshold), y = Match * 100, fill = Source)) +
-        geom_boxplot() +
-        geom_boxplot(data = stat.testing.3, aes(x = as.factor(Threshold), y = Match * 100, fill = Source)) +
-        geom_boxplot(data = stat.testing.5, aes(x = as.factor(Threshold), y = Match * 100, fill = Source)) +
-        #        scale_fill_discrete(name = "Source",
-        #                            labels = c("Blogs", "News", "Twitter", "Aggregated")) +
-        labs(title = "Prediction precision") +
-        labs(x = "Top N predictions") +
-        labs(y = "Correct prediction in top N, %") + 
-        theme_bw(base_size = 14)
-}
-
-stat.predict.sb.testing.all.line.chart <- function() {
-    if (!exists("stat.testing")) {
-        stat.testing <- stat.predict.sb.mono.collect.all()
-    }
-    
-    stat.testing.mean <- stat.testing %>%
-        filter(RemoveStopwords == FALSE) %>%
-        group_by(Source, Threshold, Rank) %>%
-        summarise(Match.Mean = mean(Match)) %>%
-        ungroup()
-
-    stat.testing.1 <- stat.testing.mean %>%
-        filter(Rank == 1)
-    stat.testing.3 <- stat.testing.mean %>%
-        filter(Rank == 3)
-    stat.testing.5 <- stat.testing.mean %>%
-        filter(Rank == 5)
-    
-    ggplot(data = stat.testing.1, aes(x = Threshold, y = Match.Mean * 100, color = Source)) +
+    ggplot(data = stat, aes(x = Threshold, y = Processing.Avg.Ms)) +
         geom_line(size = 1) +
-        geom_line(data = stat.testing.3, aes(x = Threshold, y = Match.Mean * 100, color = Source), size = 1) +
-        geom_line(data = stat.testing.5, aes(x = Threshold, y = Match.Mean * 100, color = Source), size = 1) +
-        scale_color_discrete(name = "Source",
-                        labels = c("Blogs", "News", "Twitter")) +
-        annotate(geom = "text", x = 4.5, y = 17.1, label = "Correct prediction") +
-        annotate(geom = "text", x = 4.5, y = 26.6, label = "Top 3") +
-        annotate(geom = "text", x = 4.5, y = 31.6, label = "Top 5") +
-        labs(title = "Prediction precision") +
-        labs(x = "Minimum frequency threshold of n-grams table") +
-        labs(y = "Correct prediction in top N, %") + 
+        geom_point(size = 2.5) +
+        scale_x_continuous(breaks=c(1:6)) +
+        expand_limits(y = 0) +
+        labs(title = "Average duration of prediction vs. threshold") +
+        labs(x = "Threshold") +
+        labs(y = "Duration, ms") +
         theme_bw(base_size = 14)
 }
 
+#
+# Chart: prediction quality for validation.
+#
+stat.predict.validation.chart <- function(type = "boxplot") {
+    # Collect statistics.
+    stat.sw <- stat.predict.sources.n.cache(6, "validation", removeStopwords = FALSE)
+    stat.sw$Group <- factor(paste0(stat.sw$Source, stat.sw$RemoveStopwords))
 
-
+    palette.fill = c("#F9A602",
+                     "#B80F0A",
+                     "#4CBB17",
+                     "#0F52BA")
+    
+    if (type == "boxplot") {
+        geom_func <- function(...) geom_boxplot(...)
+    } else if (type == "violin") {
+        geom_func <- function(...) geom_violin(..., adjust = 0.5,
+                                               draw_quantiles = c(0.25, 0.5, 0.75))
+    }
+    
+    ggplot(data = stat.sw, aes(x = as.factor(Rank), y = Match * 100, fill = Group)) +
+        geom_func() +
+        scale_fill_manual(name = "Source",
+                          labels = c("Aggregated",
+                                     "Blogs",
+                                     "News",
+                                     "Twitter"),
+                          values = palette.fill) +
+        labs(title = "Prediction precision (validation)") +
+        labs(x = "Top N predictions") +
+        labs(y = "Correct prediction in top N, %") + 
+        theme_bw(base_size = 14)
+}

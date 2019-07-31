@@ -3,6 +3,10 @@ title: "Next Word Prediction: Stupid Backoff"
 author: "Alexey Serdyuk"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 output: html_document
+#output:
+#  md_document:
+#    variant: markdown_github
+#always_allow_html: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -20,6 +24,8 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Stupid Backoff algorithm](#stupid_backoff_algorithm)
 * [Testing algorithm](#testing_algorithm)
 * [Optimizing meta-parameters](#optimizing_meta_parameters)
+* [Algorithm speed](#algorithm_speed)
+* [Validation](#validation)
 * [References](#references)
 
 # <a name="synopsis"></a>Synopsis
@@ -40,10 +46,13 @@ module in a text editor.
 
 The application is available online: https://serdioa.shinyapps.io/sb-predict.
 
+The source code is available on GitHub: https://github.com/serdioa/DataScienceCapstone
+
 # <a name="download_and_split"></a>Downloading and splitting the corpus
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 library(dplyr)
+library(hms)
 library(kableExtra)
 ```
 
@@ -881,48 +890,6 @@ text). The second and third chart columns show percentage of cases when the
 right word was amongst our Top-3 or Top-5 predicted candidates.
 
 ```{r threshold.1.chart, echo=FALSE, message=FALSE, fig.width=10}
-stat.predict.threshold.1.chart <- function(type = "boxplot") {
-    # Collect statistics with and without stop words.
-    stat.sw <- stat.predict.sources.n.cache(1, "testing", removeStopwords = FALSE)
-    stat.sw$Group <- factor(paste0(stat.sw$Source, stat.sw$RemoveStopwords))
-    
-    stat.nosw <- stat.predict.sources.n.cache(1, "testing", removeStopwords = TRUE)
-    stat.nosw$Group <- factor(paste0(stat.nosw$Source, stat.nosw$RemoveStopwords))
-    
-    palette.fill = c("#F9A602",
-                     "#F9A60240",
-                     "#B80F0A",
-                     "#B80F0A40",
-                     "#4CBB17",
-                     "#4CBB1740",
-                     "#0F52BA",
-                     "#0F52BA40")
-    
-    if (type == "boxplot") {
-        geom_func <- function(...) geom_boxplot(...)
-    } else if (type == "violin") {
-        geom_func <- function(...) geom_violin(..., adjust = 0.5,
-                                               draw_quantiles = c(0.25, 0.5, 0.75))
-    }
-    
-    ggplot(data = stat.sw, aes(x = as.factor(Rank), y = Match * 100, fill = Group)) +
-        geom_func() +
-        geom_func(data = stat.nosw, aes(x = as.factor(Rank), y = Match * 100, fill = Group)) +
-        scale_fill_manual(name = "Source",
-                            labels = c("Aggregated (with stop words)",
-                                       "Aggregated (without stop words)",
-                                       "Blogs (with stop words)",
-                                       "Blogs (without stop words)",
-                                       "News (with stop words)",
-                                       "News (without stop words)",
-                                       "Twitter (with stop words)",
-                                       "Twitter (without stop words)"),
-                          values = palette.fill) +
-        labs(title = "Prediction precision") +
-        labs(x = "Top N predictions") +
-        labs(y = "Correct prediction in top N, %") + 
-        theme_bw(base_size = 14)
-}
 stat.predict.threshold.1.chart("boxplot")
 ```
 
@@ -1083,37 +1050,6 @@ samples each. The chart and table below shows how our prediction quality
 changes as we increase the threshold.
 
 ```{r threshold.all.chart, echo=FALSE, message=FALSE, fig.width=10}
-stat.predict.threshold.all.chart <- function() {
-    stat.testing.all <- stat.predict.sources.agg.all.build("testing")
-    
-    stat.testing.1 <- stat.testing.all %>% filter(Rank == 1)
-    stat.testing.3 <- stat.testing.all %>% filter(Rank == 3)
-    stat.testing.5 <- stat.testing.all %>% filter(Rank == 5)
-
-    palette.color = c("#F9A602",
-                      "#B80F0A",
-                      "#4CBB17",
-                      "#0F52BA")
-    
-    ggplot(data = stat.testing.1, aes(x = Threshold, y = Mean * 100, color = Source)) +
-        geom_line(size = 1) +
-        geom_line(data = stat.testing.3, aes(x = Threshold, y = Mean * 100, color = Source), size = 1) +
-        geom_line(data = stat.testing.5, aes(x = Threshold, y = Mean * 100, color = Source), size = 1) +
-        scale_x_continuous(breaks=c(1:6)) +
-        scale_color_manual(name = "Source",
-                           labels = c("Aggregated",
-                                      "Blogs",
-                                      "News",
-                                      "Twitter"),
-                           values = palette.color) +
-        annotate(geom = "text", x = 4.5, y = 17.3, label = "Correct prediction") +
-        annotate(geom = "text", x = 4.5, y = 26.9, label = "Top 3") +
-        annotate(geom = "text", x = 4.5, y = 31.6, label = "Top 5") +
-        labs(title = "Prediction precision") +
-        labs(x = "Minimum frequency threshold of n-grams table") +
-        labs(y = "Correct prediction in top N, %") + 
-        theme_bw(base_size = 14)
-}
 stat.predict.threshold.all.chart()
 ```
 
@@ -1250,6 +1186,160 @@ often will assign to it a high score.
 
 * As we increase the threshold, the precision of our prediction is reduced, but
 not very dramatically. The average precision loss in our table is 1.5%.
+
+Now let us check size of n-gram tables in memory for various thresholds. The
+following chart and table shows an impact on table sizes of gradually increasing
+the threshold from 1 (include all n-grams) to 6 (include only n-grams which
+appears in the corpora at least 6 times).
+
+```{r echo=FALSE, message=FALSE, fig.align = "center"}
+stat.ngram.optimize.all.chart()
+```
+
+```{r echo=FALSE, message=FALSE}
+stat.size <- stat.ngram.optimize.all.cache()
+
+Size.1 <- stat.size %>% filter(N == 1) %>% pull(Size)
+Size.2 <- stat.size %>% filter(N == 2) %>% pull(Size)
+Size.3 <- stat.size %>% filter(N == 3) %>% pull(Size)
+Size.4 <- stat.size %>% filter(N == 4) %>% pull(Size)
+Size.5 <- stat.size %>% filter(N == 5) %>% pull(Size)
+Size.All <- Size.1 + Size.2 + Size.3 + Size.4 + Size.5
+
+stat.size.tbl <- data.frame(
+  Threshold = 1:6,
+  Size.1 = Size.1,
+  Size.1.Pct = sprintf("%.2f", Size.1 / Size.1[1] * 100),
+  Size.2 = Size.2,
+  Size.2.Pct = sprintf("%.2f", Size.2 / Size.2[1] * 100),
+  Size.3 = Size.3,
+  Size.3.Pct = sprintf("%.2f", Size.3 / Size.3[1] * 100),
+  Size.4 = Size.4,
+  Size.4.Pct = sprintf("%.2f", Size.4 / Size.4[1] * 100),
+  Size.5 = Size.5,
+  Size.5.Pct = sprintf("%.2f", Size.5 / Size.5[1] * 100),
+  Size.All = Size.All,
+  Size.All.Pct = sprintf("%.2f", Size.All / Size.All[1] * 100)
+)
+
+kable(stat.size.tbl,
+      caption = "Size of n-gram tables in memory",
+      booktabs = TRUE,
+      col.names = c("Threshold", rep(c("Size, MiB", "% of Max"), 6)),
+      align = c("l", rep("r", 12))) %>%
+  add_header_above(header = c("",
+                              "1-grams" = 2,
+                              "2-grams" = 2,
+                              "3-grams" = 2,
+                              "4-grams" = 2,
+                              "5-grams" = 2,
+                              "Total" = 2)) %>%
+  column_spec(12:13, bold = T, background = "#C0C0C0") %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                full_width = FALSE)
+```
+
+As the chart and the table demonstrates, increasing the threshold dramatically
+reduces the required memory. The size reduction is less for 1-grams (from
+`r stat.size.tbl$Size.1[1]` MiB to `r stat.size.tbl$Size.1[6]` MiB, that is to
+`r stat.size.tbl$Size.1.Pct[6]`% of the original), but is pretty spectacular for
+5-grams (from `r stat.size.tbl$Size.5[1]` MiB to `r stat.size.tbl$Size.5[6]`
+MiB, that is to `r stat.size.tbl$Size.5.Pct[6]`% of the original). The total
+required memory goes down from `r stat.size.tbl$Size.All[1]` MiB to
+`r stat.size.tbl$Size.All[6]` MiB, that is to `r stat.size.tbl$Size.All.Pct[6]`%
+of the original.
+
+If we use threshold 6, that is include only n-grams which appears in the corpora
+at least 6 times, the precision of our prediction is reduced by approximately
+1.5%, but required memory falls to just `r stat.size.tbl$Size.All.Pct[6]`% of
+the original, and is acceptable for a Shiny application. This looks like a good
+deal, so we decided to use n-gram tables with the threshold 6.
+
+# <a name="algorithm_speed"></a>Algorithm speed
+
+A note on the speed of the algorithm. For each value of the threshold we
+processed 100.000 samples for each of the sources (blogs, news and Twitter)
+as well as additional 100.000 samples aggregated from all sources, for 400.000
+samples in total.
+
+```{r echo=FALSE, message=FALSE, fig.align = "center"}
+stat.predict.time.chart()
+```
+
+```{r echo=FALSE, message=FALSE}
+stat.predict.time.tbl <- stat.predict.time()
+
+stat.predict.time.fmt <- data.frame(
+  Threshold = stat.predict.time.tbl$Threshold,
+  Duration.Fmt = stat.predict.time.tbl$Duration.Fmt,
+  Processing.Avg.Ms = sprintf("%.1f", stat.predict.time.tbl$Processing.Avg.Ms))
+
+kable(stat.predict.time.fmt,
+      caption = "Average duration of prediction vs. threshold",
+      booktabs = TRUE,
+      col.names = c("Threshold", "Duration, hours", " Duration per sample, ms"),
+      align = c("l", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                full_width = FALSE)
+```
+
+As the chart and table shows, increasing the threshold from 1 to 6 reduces an
+average prediction time from `r stat.predict.time.fmt$Processing.Avg.Ms[1]` to
+`r stat.predict.time.fmt$Processing.Avg.Ms[6]`, or by
+`r sprintf("%.2f%%", 100 * (1.0 - stat.predict.time.tbl$Processing.Avg.Ms[6] / stat.predict.time.tbl$Processing.Avg.Ms[1]))`.
+
+# <a name="validation"></a>Validation
+
+As the last step, we are going to validate our prediction algorithm on
+out-of-sample data, that is on the validation data set
+[we have stored](#download_and_split). Our testing approach is the same as
+before: 100 batches of 1.000 samples each for each corpus, as well as for the
+aggregated corpora.
+
+```{r echo=FALSE, message=FALSE, fig.align = "center", fig.width = 10}
+stat.predict.validation.chart()
+```
+
+```{r echo=FALSE, message=FALSE}
+stat.predict.validation.tbl.sw <- function() {
+  stat.sw <- stat.predict.sources.agg.n.build(6, "validation", removeStopwords = FALSE) %>%
+    arrange(Source) %>%
+    mutate(Mean = Mean * 100,
+           ConfIntLow = ConfIntLow * 100,
+           ConfIntHigh = ConfIntHigh * 100)
+  
+  stat.sw.1 <- stat.sw %>% filter(Rank == 1)
+  stat.sw.3 <- stat.sw %>% filter(Rank == 3)
+  stat.sw.5 <- stat.sw %>% filter(Rank == 5)
+
+  stat.sw.1.tbl <- data.frame(
+    Source = c("Aggregated", "Blogs", "News", "Twitter"),
+    Mean.1 = sprintf("%.2f", stat.sw.1$Mean),
+    ConfInt.1 = sprintf("(%.2f, %.2f)", stat.sw.1$ConfIntLow, stat.sw.1$ConfIntHigh),
+    Mean.3 = sprintf("%.2f", stat.sw.3$Mean),
+    ConfInt.3 = sprintf("(%.2f, %.2f)", stat.sw.3$ConfIntLow, stat.sw.3$ConfIntHigh),
+    Mean.5 = sprintf("%.2f", stat.sw.5$Mean),
+    ConfInt.5 = sprintf("(%.2f, %.2f)", stat.sw.5$ConfIntLow, stat.sw.5$ConfIntHigh),
+    stringsAsFactors = FALSE
+  )
+  
+  kable(stat.sw.1.tbl,
+        caption = "Prediction precision (validation)",
+        booktabs = TRUE,
+        col.names = c("Source", rep(c("Mean, %", "Conf. Int. 95%"), 3))) %>%
+    add_header_above(header = c("",
+                                "Word correctly predicted" = 2,
+                                "Word in Top 3" = 2,
+                                "Word in Top 5" = 2)) %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
+                  full_width = FALSE)
+}
+
+stat.predict.validation.tbl.sw()
+```
+
+The off-sample validation results are very close to those observed before,
+proving that the model is not overfitted.
 
 # <a name="references"></a>References
 
