@@ -17,7 +17,7 @@ which, given a text, predicts the next word. The prediction algorithm may be
 re-used as a part of a spelling correction module, or as a typing assistance
 for mobile devices.
 
-Application: https://serdioa.shinyapps.io/sb-predict
+Application: https://serdioa.shinyapps.io/predict-sb
 
 Documentation: https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html
 

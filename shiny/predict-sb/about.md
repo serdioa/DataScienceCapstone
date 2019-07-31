@@ -47,9 +47,6 @@ You may find the following links useful:
 -   Presentation:
     <a href="https://serdioa.github.io/DataScienceCapstone/presentation/index.html" class="uri">https://serdioa.github.io/DataScienceCapstone/presentation/index.html</a>
 
--   Online application:
-    <a href="https://serdioa.shinyapps.io/sb-predict" class="uri">https://serdioa.shinyapps.io/sb-predict</a>
-
 -   Source code:
     <a href="https://github.com/serdioa/DataScienceCapstone" class="uri">https://github.com/serdioa/DataScienceCapstone</a>
 

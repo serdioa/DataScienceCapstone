@@ -15,3 +15,5 @@ Project progress reports available on [GitHub pages](https://serdioa.github.io/D
 * [Implementation Report - full version](https://serdioa.github.io/DataScienceCapstone/ImplementationReport.html)
 * [Implementation Report - short version](https://serdioa.github.io/DataScienceCapstone/ImplementationReportShort.html)
 * [Presentation](https://serdioa.github.io/DataScienceCapstone/presentation/index.html)
+
+The application is available online: https://serdioa.shinyapps.io/predict-sb

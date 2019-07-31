@@ -52,7 +52,7 @@ You may find the following links useful:
 
 * Presentation: https://serdioa.github.io/DataScienceCapstone/presentation/index.html
 
-* Online application: https://serdioa.shinyapps.io/sb-predict
+* Online application: https://serdioa.shinyapps.io/predict-sb
 
 * Source code: https://github.com/serdioa/DataScienceCapstone
 
