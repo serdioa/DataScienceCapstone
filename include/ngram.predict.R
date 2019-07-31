@@ -85,8 +85,9 @@ sb.predict <- function(prefix, word.pattern = NULL, n = 5, threshold = 6, remove
     candidates <- data.frame(Prefix = character(),
                              Suffix = character(),
                              N = integer(),
-                             SuffixProb = numeric(),
-                             Score = numeric())
+                             Prob = numeric(),
+                             Score = numeric(),
+                             stringsAsFactors = FALSE)
     
     # Choose candidates from 5- to 2-grms.
     # 1-grams (context-free prediction which completely ignores the prefix)
@@ -116,11 +117,33 @@ sb.predict <- function(prefix, word.pattern = NULL, n = 5, threshold = 6, remove
                     transmute(Prefix = paste0(prefix.n, collapse = " "),
                               Suffix = Suffix,
                               N = i,
-                              SuffixProb = Prob,
+                              Prob = Prob,
                               Score = exp(Prob / 1000000 + log(0.4) * (min(4, prefix.length) - i)))
                 
                 candidates <- rbind(candidates, table.candidates.n)
             }
+            
+            # An optimization is possible here: if we have already found enough
+            # candidates, and we can prove that we will not find candidates with
+            # higher scores in remaining n-gram tables, we may exit the loop
+            # over n-grams prematurely.
+            #
+            # For example, suppose that we are searching N candidates. After
+            # checking 5-, 4- and 3-grams we have already found N candidates.
+            # Even if we will find in the 2-grams table a candidate with the
+            # highest possible probability of 1, we will scale it with the
+            # factor 0.4^3 = 0.064 for the score of 0.064. If the N-th of
+            # already found candidates has the score at least 0.064, it makes
+            # no sense to continue, so we may break the loop prematurely.
+            #
+            # We have tested over a large sample, and never encountered a case
+            # when a premature termination of a loop would make sense.
+            # Such optimization may be useful in very trivial cases (searching
+            # just 1 candidate, and found a candidate with the score of 1
+            # in 5-grams), but since such cases are extremely rare, the
+            # performance lost of the optimization logic overweights a possible
+            # gain from the optimization. We decided to not implement this
+            # optimization.
         }
     }
     
@@ -156,14 +179,14 @@ sb.predict <- function(prefix, word.pattern = NULL, n = 5, threshold = 6, remove
                                      Suffix = suggestions[[1]],
                                      N = 0,
                                      Prob = 0,
-                                     Score = 1e-10 * (suggestions.length : 1))
+                                     Score = 1e-10 * (suggestions.length : 1),
+                                     stringsAsFactors = FALSE)
         }
     }
     
     candidates %>%
         arrange(desc(Score)) %>%
-        head(n) %>%
-        mutate_if(is.factor, as.character)
+        head(n)
 }
 
 #
