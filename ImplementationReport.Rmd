@@ -22,10 +22,12 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Binary encoding for stems](#binary_encoding)
 * [Optimizing n-gram tables](#optimizing_tables).
 * [Stupid Backoff algorithm](#stupid_backoff_algorithm)
+* [Extension of the algorithm](#algorithm_extension)
 * [Testing algorithm](#testing_algorithm)
 * [Optimizing meta-parameters](#optimizing_meta_parameters)
 * [Algorithm speed](#algorithm_speed)
 * [Validation](#validation)
+* [Application](#application)
 * [References](#references)
 
 # <a name="synopsis"></a>Synopsis
@@ -37,11 +39,10 @@ The application was developed as a capstone project for the for the cycle of cou
 [Data Science Specialization](https://www.coursera.org/specializations/jhu-data-science)
 offered on [Coursera](https://www.coursera.org) by
 [Johns Hopkins University](https://www.jhu.edu).
-
 The purpose of the capstone project is to build a Natural Language Processing
 (NLP) application that, given a chunk of text, predicts the next most probable
 word. The application may be used, for example, in mobile devices to provide
-suggestions as the user tips in some text, or as a part of a spelling correction
+suggestions as the user enters text, or as a part of a spelling correction
 module in a text editor.
 
 The application is available online: https://serdioa.shinyapps.io/sb-predict.
@@ -91,7 +92,7 @@ As the first step, we split each file from the English corpora on 3 parts:
 * Testing set (20%) will be used to test the algorithm during it's development
 and tune meta-parameters. This set may be used more than once.
 * Validation set (20%) will be used for a final validation and estimation
-of out-of-sample performance. This set will be used only once.
+of out-of-sample prediction quality This set will be used only once.
 
 ```{r eval=FALSE}
 source("include/split.R")
@@ -182,7 +183,7 @@ We apply the following cleaning and pre-processing steps:
 
 * Remove URLs, e-mail addresses and Twitter hash tags.
 
-* Remove underscroll characters which sometimes are used as emphasys, or to
+* Remove underscroll characters which sometimes are used as emphasys or to
 replace a profanity.
 
 * Add missing space characters around punctuation characters as the preparation
@@ -190,24 +191,24 @@ for removing punctuation characters altogether. For example, the corpus contains
 a sentence "I had the best day yesterday,it was like two kids in a candy store".
 Note that the sentence does not contain a space character after the comma, so
 when punctuation characters are removed, words "yesterday,it" are transformed
-to a non-existing word "yesterdayit". Adding missing space characters prevents
+into a non-existing word "yesterdayit". Adding missing space characters prevents
 such error.
 
 * Remove punctuation characters.
 
-* Replace common short forms, such as "I'm", with full forms such as "I am".
+* Replace common short forms such as "I'm", with full forms such as "I am".
 The list of replacements is available in the file
 [replacements.txt](replacements.txt).
 
-* Remove words with non-latin characters. The corpora contains some words
-and even whole sentences in languages which are written by non-latin alphabets,
+* Remove words with non-latin characters. The corpora contains some words and
+even whole sentences in languages which are written using non-latin alphabets,
 such as Greek or Russian. We keep only words with standard and extended latin
 characters (that is, latin characters with various accents), but exclude words
 with any other characters.
 
 * Prepend the special token `STOS` (Start-of-Sentence). When building n-grams,
-this token will allow us to distinguish n-grams which appear at the start of the
-sentence.
+this token will allow us to distinguish n-grams which appear at the start of
+sentences.
 
 Natural language processing has a notion of [stop words](https://en.wikipedia.org/wiki/Stop_words),
 that is words which occure very often, and are often filtered out during
@@ -254,7 +255,7 @@ to slightly different word forms.
 any transformations.
 
 * We build the list of top-frequency $2^{16}-2$ stems and keep only those 
-stems in n-gram prefixes. All other stems which appear only seldom are replaced
+stems in n-gram prefixes. All other stems which appear less often are replaced
 in prefixes by the special token `UNK` (Unknown). The number $2^{16}-2$ allows
 us to represent each stem which may appear in an n-gram prefix, as well as
 2 special tokens `STOS` (Start-of-Sentence) and `UNK` (Unknown) with a number
@@ -302,7 +303,7 @@ for (n in 1:5) {
 ```
 
 On our hardware (Intel i5-7600K) commands above runs a bit more than 1 hour
-and use slightly over 30 GB of the memory.
+and use slightly over 30 GB of memory.
 
 The following table shows number of rows and memory usage of n-gram tables
 with and without stop words.
@@ -343,8 +344,7 @@ kable(stat.ngram.extended.tbl,
 
 As the table shows, tables are very large and do not satisfy requirements for a
 Shiny application (max. 1 GB). Besides, with very large tables we may expect
-a large latency. In the next sections we will reduce the size of the n-gram
-tables.
+a large latency. In the next sections we will reduce the size of n-gram tables.
 
 # <a name="binary_encoding"></a>Binary encoding for stems
 
@@ -388,8 +388,8 @@ to 2 bytes each, concatenate these bytes together with two `0x00`-bytes into a
 4-grams, except that we do not need to add `0x00`-bytes since we already have
 8 bytes from prefix codes.
 
-Let us check some examples. We will encode the 4-gram "the answer to that",
-as well as it's 1-, 2- and 3-word prefixes.
+Let us walk through several examples. We will encode the 4-gram "the answer to
+that", as well as it's 1-, 2- and 3-word prefixes.
 
 First, let us lookup codes for each stem in our 4-gram:
 ```{r message=FALSE}
@@ -456,7 +456,7 @@ and found that the tables are too large. In the previous section
 encode prefixes of n-grams either as `integer` or as `numeric`, dependent on
 a size of the prefix.
 
-Let's apply the encoding to prefixes of our n-gram tables. We also use this
+Let us apply the encoding to prefixes of our n-gram tables. We also use this
 opportunity to remove the column `Prefix` from 1-grams since it is always `NA`
 anyway.
 
@@ -479,7 +479,7 @@ stat.ngram.opt.pref.nosw <- stat.ngram.optimize.prefix.all.cache(removeStopwords
 
 The following table shows size of n-gram tables with encoded prefixes compared
 to original tables. The improvement is more pronounced for larger n.
-For instance, the size of the 5-grams table with stop words is reduced from
+For instance, the size of the 5-gram table with stop words is reduced from
 `r stat.ngram.extended.sw$Size[5]` MiB to `r stat.ngram.opt.pref.sw$Size[5]`
 MiB, or just to `r sprintf("%.2f%%", stat.ngram.opt.pref.sw$Size[5] / stat.ngram.extended.sw$Size[5] * 100)` of the former size.
  
@@ -552,11 +552,12 @@ ngram.ext.full.2.at.the.p.diff = ngram.ext.full.2.at.the.p.back - ngram.ext.full
 ngram.ext.full.2.at.the.p.diff.rel = ngram.ext.full.2.at.the.p.diff / ngram.ext.full.2.at.the.p
 ```
 
-* There are `r formatC(ngram.ext.full.2.at, big.mark = ",", format = "d")` 2-grams
-starting with the word "at". In 
-`r formatC(ngram.ext.full.2.at.the, big.mark = ",", format = "d")` cases the word
-"at" is followed by the word "the", giving the 2-gram "at the". We calculate
-the maximum likehood estimate of the suffix "the" given the prefix "at" as
+* There are `r formatC(ngram.ext.full.2.at, big.mark = ",", format = "d")`
+2-grams starting with the word "at". In
+`r formatC(ngram.ext.full.2.at.the, big.mark = ",", format = "d")` cases the
+word "at" is followed by the word "the", giving the 2-gram "at the". We
+calculate the maximum likehood estimate of the probability of the suffix "the"
+given the prefix "at" as
 
 $$P_{ML}(\text{the} | \text{at}) = \frac{c(\text{at the})}
 {\sum c(\text{at } \bullet)} = \frac{2035}{330145} \approx 0.006163958$$
@@ -567,7 +568,8 @@ $$P_{ML}(\text{the} | \text{at}) = \frac{c(\text{at the})}
 * We multiply the logarithm by $10^6$ and get an integer part of the result.
 Multiplying by $10^6$ ensures that we preserve 6 digits after the decimal point
 in the original logarithm. In our example we get
-`r ngram.ext.full.2.at.the.p.log.int`.
+`r ngram.ext.full.2.at.the.p.log.int`. This is the value we store in our n-gram
+table as an `integer`, saving 4 bytes.
 
 * When we require the original value, we inverse the transformation, dividing
 the optimized value by $10^6$ and taking the exponent of it. Continuing our
@@ -808,7 +810,7 @@ kable(predict.example.3,
                   full_width = FALSE)
 ```
 
-We add to our lists candidates which are not present it in yet.
+We add to our list candidates which are not present it in yet.
 
 * We repeat the same step with 2-grams, looking up 1-word prefix "get". We will
 find nearly 10.000 matches, the score for each of them equals the probability
@@ -817,7 +819,7 @@ are not present it in yet.
 
 * If we already have enough candidates (which is the case, unless we want to
 find more than 10.000 top-score candidates), we do not need to get context-free
-candidates from the 1-grams table.
+candidates from the 1-gram table.
 
 * Suppose our goal is to find the top 10 candidates. We sort our list by score
 in the descending order, and select the top 10 rows:
@@ -841,6 +843,26 @@ kable(predict.example.all,
                   full_width = FALSE)
 ```
 
+# <a name="algorithm_extension"></a>Extension of the algorithm
+
+We added to the base algoritm a simple optional extension which allows to
+predict a word the user is currently typing. As long as the last typed character
+is not the space character, the algorithm assumes that the user continues to
+type the current word, and predicts it. Only after a space character is typed
+the algorithm predicts the next word.
+
+The extension pretty easy integrates in the step when we choose candidate words.
+Given the prefix $w_1,w_2,\ldots,w_{n-1}$ and a partially typed word
+$w^\prime_n$ we choose all 5-gram candidates which starts with the prefix
+$w_1,w_2,\ldots,w_{n-1}$ and the 5th word starts with the word prefix
+$w^\prime_n$, and similarly for 4- to 1-grams.
+
+Some words may be missing in our dictionary, and the user may misspell some
+words. If we can't find any candidates using our n-grams, we attempt to predict
+the next word using the partialy entered word by applying a spelling correction
+algorithm provided by the R package `hunspell`. For example, if the user enters
+a misspelled word "mashine", we propose the spell-corrected word "machine".
+
 # <a name="testing_algorithm"></a>Testing algorithm
 
 Now we are ready to test our algorithm for predicting the next word using 20%
@@ -848,10 +870,10 @@ of the data [we have saved for testing before](#download_and_split). We run
 tests for each data source, as well as for the aggregated data.
 
 * Choose 100.000 random sample sentences from each source (blogs, news,
-Twitter). Split each selection on 100 samples, each of 1000 sentences.
+Twitter). Split each selection on 100 batches, each of 1000 sentences.
 
 * Create an aggregated test set of 100.000 sentences by choosing 1/3 of
-sentences from each source.
+sentences from each source. Split the aggregated test set on batches as well.
 
 * Choose a random word in a sentence, but not the very first word. Use the part
 of the sentence before the selected word as a prefix, and attempt to predict
@@ -881,6 +903,8 @@ The meaning of the parameter "threshold" will be explained later, when we will
 [optimize meta-parameters](#optimizing_meta_parameters) of the prediction
 algorithm. Now it is enough to say that "threshold = 1" uses complete tables
 with n-grams we have built before.
+
+On our hardware (Intel i5-7600K) commands above runs a bit more than 7 hours.
 
 The chart below shows the the precision of our prediction algorithm for the
 aggregated data sources, as well as separately for blogs, news and Twitter,
@@ -992,7 +1016,7 @@ section.
 Our n-gram tables contain all collected n-grams, but are all of them equally
 useful for our prediction algorithm? For example, the 5-gram "at the end of the"
 appears in our corpora 2181 times, whereas the 5-gram
-"can't go anywehre with them" appear only once. Intuitively the first n-gram
+"can't go anywhere with them" appear only once. Intuitively the first n-gram
 is much more useful, because the probability to encounter it again in other
 texts is much higher than the probability to find a seldom n-gram in another
 text.
@@ -1028,7 +1052,7 @@ In the [Mileston Report](MilestoneReportWeek2.html#3_to_6_grams) we have also
 found out that seldom n-grams comprise a very large part of tables for large n.
 For example, there are `r formatC(ngram.1.size, big.mark = ",", format = "d")`
 distinct 1-grams, and `r formatC(ngram.1.1.size, big.mark = ",", format = "d")`
-(`r sprintf("%.2f%%", ngram.1.pct * 100)`) appears just once.
+(`r sprintf("%.2f%%", ngram.1.pct * 100)`) appear just once.
 For 5-grams it looks even more dramatic: our corpora contains
 `r formatC(ngram.5.size, big.mark = ",", format = "d")` distinct 5-grams,
 and `r formatC(ngram.5.1.size, big.mark = ",", format = "d")`
@@ -1036,18 +1060,38 @@ and `r formatC(ngram.5.1.size, big.mark = ",", format = "d")`
 Removing from our tables entries which appear just once could significantly
 reduce the memory usage.
 
-If we keep in an n-gram table only entries which appear in the corpus at least
-$m$ times and remove the rest, we will say that the table has a *threshold* $m$.
-For example, a n-gram table with the threshold 3 contains only n-grams which
-appear at least 3 times. Obviously, the complete table with all available
+We will tell that the n-gram table has a *threshold* $m$, if we keep in the
+table only entries which appear in the corpus at least $m$ times and remove the
+rest. For example, a n-gram table with the threshold 3 contains only n-grams
+which appear at least 3 times. Obviously, the complete table with all available
 n-grams is a table with the threshold 1.
 
 To analyze how removing low-frequency n-grams affects precision of our
 prediction algorithm, we build n-gram tables with thresholds 2 to 6, and run
 our prediction algorithm with these tables. Our approach is the same as in the
 previous section: for each source and threshold we process 100 batches of 1.000
-samples each. The chart and table below shows how our prediction quality
-changes as we increase the threshold.
+samples each.
+
+```{r eval=FALSE}
+source("include/predict.test.R")
+
+for (source in c("blogs", "news", "twitter", "all")) {
+    for (thres in 2:6) {
+        set.seed(12345)
+        predict.test.sb.cache(source, "testing", n.samples = 100000,
+                              threshold = thres, removeStopwords = TRUE)
+    
+        set.seed(12345)
+        predict.test.sb.cache(source, "testing", n.samples = 100000,
+                              threshold = thres, removeStopwords = FALSE)
+    }
+}
+```
+
+On our hardware (Intel i5-7600K) commands above runs a bit more than 32 hours.
+
+The chart and table below shows how our prediction quality changes as we
+increase the threshold.
 
 ```{r threshold.all.chart, echo=FALSE, message=FALSE, fig.width=10}
 stat.predict.threshold.all.chart()
@@ -1170,9 +1214,10 @@ stat.predict.threshold.all.tbl()
 ```
 
 The table above shows how precision of our prediction algorithm changes
-dependent on the threshold. In each column, the cell highlighted by a light
-green contains the highest value, that is the best precision. The last line
-compares precision with threshold 6 vs. the best precision in the same column.
+dependent on the threshold. In each column the cell highlighted by a light
+green contains the highest value, that is the best precision of the prediction.
+The last line compares precision with threshold 6 vs. the best precision in the
+same column.
 
 From the chart and the table we may conclude the following:
 
@@ -1182,10 +1227,12 @@ intuitive explanation of this fact is that the Stupid Backoff algorithm scores
 longer n-grams significantly higher than shorter n-grams, without taking into
 account the absolute frequency. A 5-gram which appears just once could be 
 a typo or an extremely seldom expression, but the Stupid Backoff algorithm very
-often will assign to it a high score.
+often will assign to it a high score. Therefore, removing n-grams which appears
+just once improves the precision of prediction.
 
 * As we increase the threshold, the precision of our prediction is reduced, but
-not very dramatically. The average precision loss in our table is 1.5%.
+not very dramatically. If instead of aiming for the best precision of prediction
+we use threshold 6, we lose in average 1.5%.
 
 Now let us check size of n-gram tables in memory for various thresholds. The
 following chart and table shows an impact on table sizes of gradually increasing
@@ -1239,13 +1286,14 @@ kable(stat.size.tbl,
                 full_width = FALSE)
 ```
 
-As the chart and the table demonstrates, increasing the threshold dramatically
-reduces the required memory. The size reduction is less for 1-grams (from
-`r stat.size.tbl$Size.1[1]` MiB to `r stat.size.tbl$Size.1[6]` MiB, that is to
-`r stat.size.tbl$Size.1.Pct[6]`% of the original), but is pretty spectacular for
-5-grams (from `r stat.size.tbl$Size.5[1]` MiB to `r stat.size.tbl$Size.5[6]`
-MiB, that is to `r stat.size.tbl$Size.5.Pct[6]`% of the original). The total
-required memory goes down from `r stat.size.tbl$Size.All[1]` MiB to
+As the chart and the table demonstrate, increasing the threshold dramatically
+reduces the required memory. As we increase the threshold from 1 to 6,
+the size reduction is less for 1-grams (from `r stat.size.tbl$Size.1[1]` MiB to
+`r stat.size.tbl$Size.1[6]` MiB, that is to `r stat.size.tbl$Size.1.Pct[6]`% of
+the original), but is pretty spectacular for 5-grams (from
+`r stat.size.tbl$Size.5[1]` MiB to `r stat.size.tbl$Size.5[6]` MiB, that is to
+`r stat.size.tbl$Size.5.Pct[6]`% of the original). The total required memory
+goes down from `r stat.size.tbl$Size.All[1]` MiB to
 `r stat.size.tbl$Size.All[6]` MiB, that is to `r stat.size.tbl$Size.All.Pct[6]`%
 of the original.
 
@@ -1272,29 +1320,46 @@ stat.predict.time.tbl <- stat.predict.time()
 stat.predict.time.fmt <- data.frame(
   Threshold = stat.predict.time.tbl$Threshold,
   Duration.Fmt = stat.predict.time.tbl$Duration.Fmt,
+  Samples = rep("400.000", 6),
   Processing.Avg.Ms = sprintf("%.1f", stat.predict.time.tbl$Processing.Avg.Ms))
 
 kable(stat.predict.time.fmt,
       caption = "Average duration of prediction vs. threshold",
       booktabs = TRUE,
-      col.names = c("Threshold", "Duration, hours", " Duration per sample, ms"),
+      col.names = c("Threshold", "Duration, hours", "No. of samples", " Duration per sample, ms"),
       align = c("l", "r", "r")) %>%
   kable_styling(bootstrap_options = c("striped", "bordered", "hover"),
                 full_width = FALSE)
 ```
 
 As the chart and table shows, increasing the threshold from 1 to 6 reduces an
-average prediction time from `r stat.predict.time.fmt$Processing.Avg.Ms[1]` to
-`r stat.predict.time.fmt$Processing.Avg.Ms[6]`, or by
+average prediction duration from `r stat.predict.time.fmt$Processing.Avg.Ms[1]`
+ms to `r stat.predict.time.fmt$Processing.Avg.Ms[6]` ms, or by
 `r sprintf("%.2f%%", 100 * (1.0 - stat.predict.time.tbl$Processing.Avg.Ms[6] / stat.predict.time.tbl$Processing.Avg.Ms[1]))`.
 
 # <a name="validation"></a>Validation
 
 As the last step, we are going to validate our prediction algorithm on
-out-of-sample data, that is on the validation data set
-[we have stored](#download_and_split). Our testing approach is the same as
-before: 100 batches of 1.000 samples each for each corpus, as well as for the
-aggregated corpora.
+out-of-sample data, that is on the data set
+[we have saved for validation](#download_and_split) earlier. Our testing
+approach is the same as before: 100 batches of 1.000 samples each for each
+corpus, as well as for the aggregated corpora.
+
+```{r eval=FALSE}
+source("include/predict.test.R")
+
+for (source in c("blogs", "news", "twitter", "all")) {
+    set.seed(12345)
+    predict.test.sb.cache(source, "validation", n.samples = 100000,
+                          threshold = 6, removeStopwords = TRUE)
+    
+    set.seed(12345)
+    predict.test.sb.cache(source, "validation", n.samples = 100000,
+                          threshold = 6, removeStopwords = FALSE)
+}
+```
+
+On our hardware (Intel i5-7600K) commands above runs a approximately 2.5 hours.
 
 ```{r echo=FALSE, message=FALSE, fig.align = "center", fig.width = 10}
 stat.predict.validation.chart()
@@ -1340,6 +1405,37 @@ stat.predict.validation.tbl.sw()
 
 The off-sample validation results are very close to those observed before,
 proving that the model is not overfitted.
+
+# <a name="application"></a>Application
+
+A [Shiny application](https://shiny.rstudio.com) using our prediction algorithm
+is available online: https://serdioa.shinyapps.io/sb-predict.
+
+The application GUI provides the following elements:
+
+* Text area: enter the text here, and predicted words will appear on the chart
+below. The chart shows multiple candidates ordered by score, providing a visual
+clue on how probable each candidate is. When "Predict partially entered words"
+is activated, **you have to type the space character to predict the next word**,
+otherwise an ending of the current word is predicted.
+
+* Number of predictions: choose from 1 to 10 candidates to predict.
+
+* Predict partially entered words: select the checkbox to activate the extension
+which predicts partially entered words.
+
+* Random sample: populate the text area with a random sample from a selection
+of over 1000 prepared sample texts.
+
+![](presentation/application.png)
+
+* The application shows predictions as you type, displaying a chart with ranks
+of predicted words.
+
+![](presentation/prediction.png)
+
+* The prediction itself takes less than 20 ms, most of the observed delay is due
+to the Shiny framework and network latency.
 
 # <a name="references"></a>References
 
