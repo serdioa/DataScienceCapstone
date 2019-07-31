@@ -52,7 +52,7 @@ shinyUI(
                 )),
                 fluidRow(column(4,
                     sliderInput("n.predictions", "Number of predictions:",
-                                min = 1, max = 10, value = 5)
+                                min = 1, max = 10, value = 1)
                 ),
                 column(2, offset = 2,
                     actionButton("randomSample", label = "Random Sample")
@@ -60,7 +60,7 @@ shinyUI(
                 fluidRow(column(12,
                     checkboxInput("predictPartial",
                                   label = "Predict partially entered words",
-                                  value = TRUE)
+                                  value = FALSE)
                 )),
                 fluidRow(column(12, plotlyOutput("predictionPlot")))
             )
